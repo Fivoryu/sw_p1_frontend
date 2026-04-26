@@ -1,0 +1,67 @@
+<div class="login-container">
+  <div class="login-card">
+    <h1>Workflow Engine</h1>
+    <h2>Administrador</h2>
+
+    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
+      <!-- Error Message -->
+      <div *ngIf="error" class="error-message">
+        <strong>Error:</strong> {{ error }}
+      </div>
+
+      <!-- Username -->
+      <div class="form-group">
+        <label for="username">Usuario:</label>
+        <input
+          type="text"
+          id="username"
+          class="form-control"
+          formControlName="username"
+          [class.is-invalid]="submitted && f['username'].errors"
+          placeholder="Ingrese su usuario"
+        />
+        <div *ngIf="submitted && f['username'].errors" class="invalid-feedback">
+          <div *ngIf="f['username'].errors['required']">El usuario es requerido</div>
+          <div *ngIf="f['username'].errors['minlength']">El usuario debe tener al menos 3 caracteres</div>
+        </div>
+      </div>
+
+      <!-- Password -->
+      <div class="form-group">
+        <label for="password">Contraseña:</label>
+        <input
+          type="password"
+          id="password"
+          class="form-control"
+          formControlName="password"
+          [class.is-invalid]="submitted && f['password'].errors"
+          placeholder="Ingrese su contraseña"
+        />
+        <div *ngIf="submitted && f['password'].errors" class="invalid-feedback">
+          <div *ngIf="f['password'].errors['required']">La contraseña es requerida</div>
+          <div *ngIf="f['password'].errors['minlength']">La contraseña debe tener al menos 6 caracteres</div>
+        </div>
+      </div>
+
+      <!-- Submit Button -->
+      <button
+        type="submit"
+        class="btn btn-primary btn-block"
+        [disabled]="loading"
+      >
+        <span *ngIf="!loading">Iniciar Sesión</span>
+        <span *ngIf="loading">
+          <span class="spinner-border spinner-border-sm mr-2"></span>
+          Cargando...
+        </span>
+      </button>
+    </form>
+
+    <!-- Demo Credentials -->
+    <div class="demo-info">
+      <p><strong>Credenciales de Prueba:</strong></p>
+      <p>Usuario: <code>admin</code></p>
+      <p>Contraseña: <code>admin123</code></p>
+    </div>
+  </div>
+</div>

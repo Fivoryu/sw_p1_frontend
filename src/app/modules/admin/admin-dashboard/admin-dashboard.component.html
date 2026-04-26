@@ -1,0 +1,108 @@
+<main class="dashboard-main">
+  <section class="intro-card">
+    <div>
+      <span class="eyebrow">Administración</span>
+      <h2>Resumen del backoffice</h2>
+      <p>Desde aquí gestionas políticas, departamentos y el catálogo ejecutable del sistema.</p>
+    </div>
+    <div class="intro-actions">
+      <button class="btn btn-secondary" (click)="navigateTo('/admin/policies')">Diseñar política</button>
+      <button class="btn btn-secondary" (click)="navigateTo('/admin/departments')">Ver departamentos</button>
+    </div>
+  </section>
+
+    <section class="stats-grid">
+      <article class="stat-card">
+        <span class="stat-label">Políticas totales</span>
+        <strong class="stat-value">{{ policies.length }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Publicadas</span>
+        <strong class="stat-value">{{ publishedPoliciesCount }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Borradores</span>
+        <strong class="stat-value">{{ draftPoliciesCount }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Usuario activo</span>
+        <strong class="stat-value">{{ currentUser?.username }}</strong>
+      </article>
+    </section>
+
+    <section class="dashboard-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Casos de uso</span>
+          <h3>Capacidades disponibles</h3>
+        </div>
+      </div>
+
+      <div class="use-case-grid">
+        <article
+          *ngFor="let uc of usesCases"
+          class="use-case-card"
+          [ngClass]="getStatusClass(uc.status)"
+        >
+          <div class="use-case-top">
+            <span class="use-case-id">{{ uc.id }}</span>
+            <span class="status-badge" [ngClass]="getStatusClass(uc.status)">
+              {{ uc.status === 'completed' ? 'Disponible' : 'En evolución' }}
+            </span>
+          </div>
+          <h4>{{ uc.name }}</h4>
+          <p>{{ uc.description }}</p>
+          <div class="use-case-actions">
+            <button
+              *ngIf="uc.route"
+              class="btn btn-secondary"
+              (click)="navigateTo(uc.route)"
+            >
+              Abrir
+            </button>
+            <button
+              *ngIf="uc.action"
+              class="btn btn-secondary"
+              (click)="executeAction(uc.action)"
+            >
+              Ejecutar
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dashboard-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Catálogo</span>
+          <h3>Políticas registradas</h3>
+        </div>
+      </div>
+
+      <div *ngIf="loading" class="info-box">Cargando políticas...</div>
+      <div *ngIf="error" class="info-box error-box">{{ error }}</div>
+
+      <div *ngIf="!loading && policies.length === 0" class="empty-box">
+        Aún no hay políticas registradas. Crea la primera desde el diseñador.
+      </div>
+
+      <div *ngIf="!loading && policies.length > 0" class="policy-list">
+        <article class="policy-card" *ngFor="let policy of policies">
+          <div class="policy-main">
+            <div class="policy-title-row">
+              <h4>{{ policy.name }}</h4>
+              <span class="status-badge" [ngClass]="'status-' + policy.status.toLowerCase()">
+                {{ policy.status }}
+              </span>
+            </div>
+            <p>{{ policy.description }}</p>
+          </div>
+          <div class="policy-meta">
+            <span>Versión {{ policy.version }}</span>
+            <button class="btn btn-secondary" (click)="navigateTo('/admin/policies')">Editar</button>
+          </div>
+        </article>
+      </div>
+    </section>
+</main>

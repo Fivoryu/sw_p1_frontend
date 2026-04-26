@@ -1,0 +1,160 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  padding: 40px;
+  width: 100%;
+  max-width: 400px;
+
+  h1 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 32px;
+    font-weight: bold;
+  }
+
+  h2 {
+    text-align: center;
+    color: #667eea;
+    margin-bottom: 30px;
+    font-size: 18px;
+    font-weight: 500;
+  }
+
+  form {
+    margin-bottom: 20px;
+  }
+}
+
+.form-group {
+  margin-bottom: 20px;
+
+  label {
+    display: block;
+    margin-bottom: 8px;
+    color: #333;
+    font-weight: 500;
+    font-size: 14px;
+  }
+
+  input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.3s;
+
+    &:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    &.is-invalid {
+      border-color: #dc3545;
+    }
+  }
+}
+
+.invalid-feedback {
+  color: #dc3545;
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.error-message {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+
+  &.btn-primary {
+    background-color: #667eea;
+    color: white;
+
+    &:hover:not(:disabled) {
+      background-color: #5568d3;
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+
+  &.btn-block {
+    display: block;
+  }
+}
+
+.spinner-border {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  vertical-align: middle;
+  border: 0.25em solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-border 0.75s linear infinite;
+}
+
+.spinner-border-sm {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-width: 0.2em;
+}
+
+.mr-2 {
+  margin-right: 0.5rem;
+}
+
+@keyframes spinner-border {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.demo-info {
+  background-color: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  padding: 15px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #004085;
+
+  p {
+    margin: 5px 0;
+
+    code {
+      background-color: #f1f1f1;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+  }
+}
