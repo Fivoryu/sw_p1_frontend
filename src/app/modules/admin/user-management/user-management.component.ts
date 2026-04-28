@@ -299,7 +299,7 @@ export class UserManagementComponent {
     const payload = {
       email: this.draft.email.trim(),
       roles: this.draft.roles ?? [],
-      departamento: this.draft.departamento.trim() || null,
+      departamento: this.draft.departamento.trim() || undefined,
       active: this.draft.active
     };
 
