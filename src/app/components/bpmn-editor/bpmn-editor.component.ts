@@ -20,58 +20,134 @@ declare var BpmnModeler: any;
     MatFormFieldModule
   ],
   template: `
-    <div class="editor-container">
+    <section class="editor-container">
+      <header class="editor-header">
+        <div>
+          <span class="eyebrow">Diseñador BPMN</span>
+          <h3>Editor base de políticas</h3>
+          <p>Plantilla de edición rápida para pruebas visuales del modelador.</p>
+        </div>
+        <span class="status-chip">{{ statusMessage }}</span>
+      </header>
+
       <div class="toolbar">
-        <input
-          type="text"
-          placeholder="Nombre de la política"
-          [(ngModel)]="policyName"
-          class="input-policy-name"
-        />
-        <input
-          type="text"
-          placeholder="Descripción"
-          [(ngModel)]="policyDescription"
-          class="input-policy-desc"
-        />
-        <button mat-raised-button color="primary" (click)="onSavePolicy()">
-          Guardar Política
-        </button>
-        <button mat-raised-button (click)="onExportBPMN()">
-          Exportar XML
-        </button>
+        <div class="inputs-grid">
+          <input
+            type="text"
+            placeholder="Nombre de la política"
+            [(ngModel)]="policyName"
+            class="input-policy-name"
+          />
+          <input
+            type="text"
+            placeholder="Descripción"
+            [(ngModel)]="policyDescription"
+            class="input-policy-desc"
+          />
+        </div>
+        <div class="toolbar-actions">
+          <button mat-raised-button color="primary" (click)="onSavePolicy()">
+            Guardar política
+          </button>
+          <button mat-raised-button (click)="onExportBPMN()">
+            Exportar XML
+          </button>
+        </div>
       </div>
 
       <div class="canvas" #canvas id="canvas"></div>
-    </div>
+    </section>
   `,
   styles: [`
     .editor-container {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      gap: 12px;
       height: 100%;
     }
 
+    .editor-header {
+      border: 1px solid #dbe4f0;
+      border-radius: 16px;
+      padding: 14px 16px;
+      background: #f8fbff;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 11px;
+      font-weight: 700;
+      color: #1d4ed8;
+    }
+
+    .editor-header h3 {
+      margin: 8px 0 6px;
+    }
+
+    .editor-header p {
+      margin: 0;
+      color: #475569;
+    }
+
+    .status-chip {
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
     .toolbar {
-      padding: 10px;
-      background-color: #f5f5f5;
-      border-bottom: 1px solid #ddd;
+      border: 1px solid #dbe4f0;
+      border-radius: 16px;
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .inputs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .toolbar-actions {
       display: flex;
       gap: 10px;
-      align-items: center;
+      flex-wrap: wrap;
     }
 
     .input-policy-name,
     .input-policy-desc {
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      flex: 1;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
     }
 
     .canvas {
       flex: 1;
       background: white;
+      min-height: 420px;
+      border: 1px solid #dbe4f0;
+      border-radius: 16px;
+    }
+
+    @media (max-width: 860px) {
+      .editor-header {
+        flex-direction: column;
+      }
+
+      .inputs-grid {
+        grid-template-columns: 1fr;
+      }
     }
   `]
 })
@@ -82,6 +158,7 @@ export class BpmnEditorComponent implements AfterViewInit {
   policyName = '';
   policyDescription = '';
   currentBpmnXml = '';
+  statusMessage = 'Modo preparación';
 
   private defaultDiagram = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -119,6 +196,7 @@ export class BpmnEditorComponent implements AfterViewInit {
     // Este código ejecuta cuando bpmn-js esté cargado
     // Por ahora es un placeholder
     this.toastr.info('Editor BPMN inicializado (necesita bpmn-js librería cargada)');
+    this.statusMessage = 'Editor inicializado';
   }
 
   onSavePolicy() {
@@ -130,10 +208,12 @@ export class BpmnEditorComponent implements AfterViewInit {
     // Aquí iría la lógica para guardar
     // this.workflowService.createPolicy(this.policyName, this.policyDescription, this.currentBpmnXml)
     this.toastr.success('Política guardada (implementación pendiente)');
+    this.statusMessage = 'Guardado local';
   }
 
   onExportBPMN() {
     // Aquí exportar XML
     this.toastr.info('XML exportado (implementación pendiente)');
+    this.statusMessage = 'XML exportado';
   }
 }

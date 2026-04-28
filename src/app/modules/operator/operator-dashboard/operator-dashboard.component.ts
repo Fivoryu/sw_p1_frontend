@@ -14,7 +14,7 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
         <div>
           <span class="eyebrow">Operación diaria</span>
           <h2>Resumen del funcionario</h2>
-          <p>Panel centrado en CU8, CU9, CU10 y CU12: bandeja, formularios, derivación e historial operativo.</p>
+          <p>Panel centrado en CU-14 a CU-21: bandeja, reclamo, formularios, derivación, historial y búsqueda operativa.</p>
         </div>
         <button class="primary-btn" type="button" (click)="goToInbox()">Ir a la bandeja</button>
       </section>
@@ -49,22 +49,22 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
 
           <div class="use-case-grid">
             <button class="use-case-card" type="button" (click)="goToInbox()">
-              <span class="use-case-id">CU8</span>
+              <span class="use-case-id">CU-14</span>
               <strong>Visualizar bandeja</strong>
               <p>Consulta tareas pendientes por departamento y prioridad.</p>
             </button>
             <button class="use-case-card" type="button" (click)="goToInbox()">
-              <span class="use-case-id">CU9</span>
+              <span class="use-case-id">CU-16</span>
               <strong>Cumplimentar formulario</strong>
               <p>Completa el formulario dinámico asociado al nodo actual.</p>
             </button>
             <button class="use-case-card" type="button" (click)="goToInbox()">
-              <span class="use-case-id">CU10</span>
+              <span class="use-case-id">CU-18</span>
               <strong>Derivar trámite</strong>
               <p>Avanza el flujo según la política publicada y el contexto del caso.</p>
             </button>
             <button class="use-case-card" type="button" (click)="goToHistory()">
-              <span class="use-case-id">CU12</span>
+              <span class="use-case-id">CU-20</span>
               <strong>Consultar historial</strong>
               <p>Revisa trazabilidad, formularios completados y eventos previos.</p>
             </button>

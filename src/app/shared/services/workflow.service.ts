@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
   CorrectionResult,
+  CorrectionTarget,
   DraftSaveResult,
   OperatorTask,
   Policy,
@@ -115,6 +116,17 @@ export class WorkflowService {
   requestOperatorTaskCorrection(taskId: string, motivo: string): Observable<CorrectionResult> {
     return this.http.post<CorrectionResult>(`${this.baseUrl}/workflow/funcionario/tareas/${taskId}/solicitar-correccion`, {
       motivo
+    });
+  }
+
+  listOperatorCorrectionTargets(taskId: string): Observable<CorrectionTarget[]> {
+    return this.http.get<CorrectionTarget[]>(`${this.baseUrl}/workflow/funcionario/tareas/${taskId}/correccion/targets`);
+  }
+
+  requestOperatorTaskCorrectionTo(taskId: string, motivo: string, targetNodeId?: string | null): Observable<CorrectionResult> {
+    return this.http.post<CorrectionResult>(`${this.baseUrl}/workflow/funcionario/tareas/${taskId}/solicitar-correccion`, {
+      motivo,
+      targetNodeId: targetNodeId || null
     });
   }
 

@@ -14,7 +14,7 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
     <section class="page">
       <header class="page-header">
         <div>
-          <span class="eyebrow">CU8 · Worklist</span>
+          <span class="eyebrow">CU-14 · BANDEJA DE TAREAS</span>
           <h2>Bandeja de tareas</h2>
           <p>{{ currentDepartment }} · {{ filteredTasks.length }} tareas visibles para tu atención</p>
         </div>
@@ -28,6 +28,8 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
           <option value="ALL">Todos los estados</option>
           <option value="PENDING">Pendientes</option>
           <option value="IN_PROGRESS">En proceso</option>
+          <option value="RETURNED">Devueltas</option>
+          <option value="COMPLETED">Completadas</option>
         </select>
         <select [(ngModel)]="priorityFilter">
           <option value="ALL">Todas las prioridades</option>
@@ -35,8 +37,9 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
           <option value="MEDIUM">Media</option>
           <option value="NORMAL">Normal</option>
         </select>
-        <input [(ngModel)]="searchTerm" placeholder="Buscar por cliente, trámite o tarea" />
-        <input [(ngModel)]="fromDate" type="date" />
+        <input [(ngModel)]="searchTerm" placeholder="Buscar por cliente, DNI, trámite o tarea" />
+        <input [(ngModel)]="fromDate" type="date" aria-label="Fecha desde" />
+        <input [(ngModel)]="toDate" type="date" aria-label="Fecha hasta" />
       </section>
 
       <section class="stats-grid">
@@ -113,7 +116,7 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
     .page-header p { margin: 0; color: #64748b; }
     .header-actions { display: flex; gap: 10px; }
     .filter-bar, .stat-card, .table-card, .empty-box { background: rgba(255,255,255,.9); border: 1px solid #dbe4f0; border-radius: 24px; box-shadow: 0 18px 40px rgba(15,23,42,.08); }
-    .filter-bar { padding: 16px; display: grid; grid-template-columns: 220px 220px minmax(220px, 1fr) 180px; gap: 12px; }
+    .filter-bar { padding: 16px; display: grid; grid-template-columns: 200px 200px minmax(220px, 1fr) 170px 170px; gap: 12px; }
     select, input { width: 100%; padding: 11px 14px; border: 1px solid #cbd5e1; border-radius: 14px; background: #fff; }
     .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
     .stat-card { padding: 16px 18px; display: grid; gap: 8px; }
@@ -155,6 +158,7 @@ export class TaskWorklistComponent implements OnInit, OnDestroy {
   priorityFilter = 'ALL';
   searchTerm = '';
   fromDate = '';
+  toDate = '';
   private sockets: WebSocket[] = [];
 
   constructor(
@@ -181,12 +185,16 @@ export class TaskWorklistComponent implements OnInit, OnDestroy {
       const haystack = [
         task.workflowInstanceId,
         task.clienteNombre,
+        task.clienteDni,
         task.nombreTarea,
-        task.departamentoAsignado
+        task.departamentoAsignado,
+        task.prioridad
       ].join(' ').toLowerCase();
       const matchesSearch = !query || haystack.includes(query);
       const created = task.fechaCreacion ? new Date(task.fechaCreacion) : null;
-      const matchesDate = !this.fromDate || (created !== null && created >= new Date(`${this.fromDate}T00:00:00`));
+      const matchesFromDate = !this.fromDate || (created !== null && created >= new Date(`${this.fromDate}T00:00:00`));
+      const matchesToDate = !this.toDate || (created !== null && created <= new Date(`${this.toDate}T23:59:59`));
+      const matchesDate = matchesFromDate && matchesToDate;
       return matchesStatus && matchesPriority && matchesSearch && matchesDate;
     });
   }

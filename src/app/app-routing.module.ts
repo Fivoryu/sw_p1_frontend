@@ -4,11 +4,14 @@ import { RouterModule, Routes } from '@angular/router';
 // Components
 import { LoginComponent } from './modules/auth/login/login.component';
 import { LogoutComponent } from './modules/auth/logout/logout.component';
+import { PasswordRecoveryComponent } from './modules/auth/password-recovery/password-recovery.component';
 import { AdminShellLayoutComponent } from './layouts/admin-shell-layout.component';
 import { OperatorShellLayoutComponent } from './layouts/operator-shell-layout.component';
 import { AdminDashboardComponent } from './modules/admin/admin-dashboard/admin-dashboard.component';
 import { DepartmentManagementComponent } from './modules/admin/department-management/department-management.component';
 import { PolicyEditorComponent } from './modules/admin/policy-editor/policy-editor.component';
+import { UserManagementComponent } from './modules/admin/user-management/user-management.component';
+import { SimulationComponent } from './modules/admin/simulation/simulation.component';
 import { OperatorDashboardComponent } from './modules/operator/operator-dashboard/operator-dashboard.component';
 import { ExecuteTaskComponent } from './modules/operator/execute-task/execute-task.component';
 import { TaskWorklistComponent } from './modules/operator/task-worklist/task-worklist.component';
@@ -26,6 +29,10 @@ const routes: Routes = [
   {
     path: 'logout',
     component: LogoutComponent
+  },
+  {
+    path: 'recover',
+    component: PasswordRecoveryComponent
   },
 
   // Admin routes
@@ -58,6 +65,14 @@ const routes: Routes = [
       {
         path: 'departments',
         component: DepartmentManagementComponent
+      },
+      {
+        path: 'users',
+        component: UserManagementComponent
+      },
+      {
+        path: 'simulation',
+        component: SimulationComponent
       }
     ]
   },

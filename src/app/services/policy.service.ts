@@ -19,11 +19,45 @@ export interface CreatePolicyRequest {
   collaborationMode?: string;
 }
 
+export interface DiagramGenerationRequest {
+  prompt: string;
+  business_context?: string;
+  output_format: 'bpmn';
+}
+
+export interface GeneratedDiagramNode {
+  id: string;
+  type: 'START' | 'END' | 'TASK' | 'DECISION' | 'PARALLEL' | string;
+  label: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GeneratedDiagramFlow {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface DiagramGenerationResponse {
+  success: boolean;
+  normalized_prompt: string;
+  detected_steps: Array<Record<string, unknown>>;
+  generated_structure: {
+    nodes: GeneratedDiagramNode[];
+    flows: GeneratedDiagramFlow[];
+    metadata?: Record<string, unknown>;
+  };
+  bpmn_xml: string | null;
+  output_format: string;
+  warnings: string[];
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class PolicyService {
   private apiUrl = 'http://localhost:8080/api/v1/policies';
+  private aiDiagramUrl = 'http://localhost:8090/diagrams/generate';
 
   constructor(private http: HttpClient) {}
 
@@ -82,5 +116,9 @@ export class PolicyService {
    */
   deletePolicy(id: string): Observable<void> {
     return this.http.delete<void>(`${this.apiUrl}/${id}`);
+  }
+
+  generateDiagramFromPrompt(payload: DiagramGenerationRequest): Observable<DiagramGenerationResponse> {
+    return this.http.post<DiagramGenerationResponse>(this.aiDiagramUrl, payload);
   }
 }

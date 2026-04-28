@@ -22,8 +22,12 @@ import { DepartmentDefinition } from '../../../shared/models/workflow.model';
             <strong>{{ departments.length }}</strong>
           </div>
           <div class="metric-card">
-            <span>Modo</span>
-            <strong>{{ editingDepartment ? 'Edición' : 'Nuevo' }}</strong>
+            <span>Roles únicos</span>
+            <strong>{{ uniqueRolesCount }}</strong>
+          </div>
+          <div class="metric-card">
+            <span>Vista</span>
+            <strong>{{ editingDepartment ? 'Edición' : 'Creación' }}</strong>
           </div>
         </div>
       </header>
@@ -71,10 +75,20 @@ import { DepartmentDefinition } from '../../../shared/models/workflow.model';
               <span class="eyebrow">Directorio</span>
               <h3>Catálogo actual</h3>
             </div>
+            <input
+              class="search-input"
+              [(ngModel)]="searchTerm"
+              placeholder="Buscar por nombre, rol o descripción"
+            />
           </div>
 
-          <div class="department-list">
-            <article class="department-card" *ngFor="let department of departments">
+          <div class="state-box" *ngIf="loading">Cargando departamentos...</div>
+          <div class="state-box warning" *ngIf="!loading && !filteredDepartments.length">
+            No se encontraron departamentos para el criterio ingresado.
+          </div>
+
+          <div class="department-list" *ngIf="!loading && filteredDepartments.length">
+            <article class="department-card" *ngFor="let department of filteredDepartments">
               <div class="department-main">
                 <div class="department-top">
                   <h4>{{ department.name }}</h4>
@@ -108,6 +122,7 @@ import { DepartmentDefinition } from '../../../shared/models/workflow.model';
     .editor-panel, .catalog-panel { padding: 22px; display: grid; gap: 18px; }
     .panel-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
     .panel-header h3 { margin: 8px 0 0; font-size: 24px; }
+    .search-input { width: min(360px, 100%); padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 14px; background: #f8fafc; }
     .ghost-btn, .primary-btn, .secondary-btn, .danger-btn { border: 0; border-radius: 14px; padding: 11px 16px; cursor: pointer; font-weight: 700; }
     .ghost-btn { background: #eef2ff; color: #3730a3; }
     .primary-btn { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; }
@@ -119,6 +134,8 @@ import { DepartmentDefinition } from '../../../shared/models/workflow.model';
     .input-group input, .input-group textarea { width: 100%; padding: 13px 14px; border: 1px solid #cbd5e1; border-radius: 16px; background: #f8fafc; }
     .actions { display: flex; gap: 12px; flex-wrap: wrap; }
     .feedback { margin: 0; color: #0369a1; }
+    .state-box { border-radius: 16px; border: 1px dashed #cbd5e1; padding: 14px 16px; color: #475569; background: #f8fafc; }
+    .state-box.warning { border-color: #fdba74; background: #fff7ed; color: #9a3412; }
     .department-list { display: grid; gap: 14px; }
     .department-card { border: 1px solid #dbe4f0; border-radius: 20px; padding: 18px; background: #f8fafc; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
     .department-main { min-width: 0; display: grid; gap: 10px; }
@@ -139,6 +156,8 @@ export class DepartmentManagementComponent implements OnInit {
   departments: DepartmentDefinition[] = [];
   editingDepartment: DepartmentDefinition | null = null;
   feedback = '';
+  searchTerm = '';
+  loading = false;
 
   draft: Omit<DepartmentDefinition, 'id'> = {
     name: '',
@@ -152,10 +171,33 @@ export class DepartmentManagementComponent implements OnInit {
     this.loadDepartments();
   }
 
+  get filteredDepartments(): DepartmentDefinition[] {
+    const term = this.searchTerm.trim().toLowerCase();
+    if (!term) {
+      return this.departments;
+    }
+    return this.departments.filter(department =>
+      department.name.toLowerCase().includes(term) ||
+      department.role.toLowerCase().includes(term) ||
+      (department.description ?? '').toLowerCase().includes(term)
+    );
+  }
+
+  get uniqueRolesCount(): number {
+    return new Set(this.departments.map(department => department.role)).size;
+  }
+
   loadDepartments(): void {
+    this.loading = true;
     this.departmentService.getDepartments().subscribe({
-      next: departments => this.departments = departments,
-      error: () => this.feedback = 'No se pudo cargar el catálogo de departamentos.'
+      next: departments => {
+        this.departments = departments;
+        this.loading = false;
+      },
+      error: () => {
+        this.feedback = 'No se pudo cargar el catálogo de departamentos.';
+        this.loading = false;
+      }
     });
   }
 
@@ -165,9 +207,14 @@ export class DepartmentManagementComponent implements OnInit {
       return;
     }
 
+    const normalizedDraft = {
+      ...this.draft,
+      role: this.normalizeRole(this.draft.role)
+    };
+
     const request$ = this.editingDepartment
-      ? this.departmentService.updateDepartment(this.editingDepartment.id, { ...this.draft, active: true })
-      : this.departmentService.createDepartment(this.draft);
+      ? this.departmentService.updateDepartment(this.editingDepartment.id, { ...normalizedDraft, active: true })
+      : this.departmentService.createDepartment(normalizedDraft);
 
     request$.subscribe({
       next: () => {
@@ -189,6 +236,10 @@ export class DepartmentManagementComponent implements OnInit {
   }
 
   deleteDepartment(id: string): void {
+    if (!confirm('¿Deseas eliminar este departamento? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
     this.departmentService.deleteDepartment(id).subscribe({
       next: () => {
         this.feedback = 'Departamento eliminado.';
@@ -201,5 +252,13 @@ export class DepartmentManagementComponent implements OnInit {
   resetDraft(): void {
     this.editingDepartment = null;
     this.draft = { name: '', role: '', description: '' };
+  }
+
+  private normalizeRole(role: string): string {
+    const clean = role.trim().toUpperCase().replace(/\s+/g, '_');
+    if (!clean) {
+      return clean;
+    }
+    return clean.startsWith('ROLE_') ? clean : `ROLE_${clean}`;
   }
 }

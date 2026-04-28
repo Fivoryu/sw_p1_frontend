@@ -1,11 +1,18 @@
 import { CommonModule } from '@angular/common';
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import Modeler from 'bpmn-js/lib/Modeler';
+import { Subscription } from 'rxjs';
 import { AuthService } from '../../../services/auth.service';
 import { DepartmentService } from '../../../services/department.service';
-import { CreatePolicyRequest, PolicyService } from '../../../services/policy.service';
+import {
+  CreatePolicyRequest,
+  DiagramGenerationResponse,
+  GeneratedDiagramFlow,
+  GeneratedDiagramNode,
+  PolicyService
+} from '../../../services/policy.service';
 import {
   DepartmentDefinition,
   FormDefinition,
@@ -63,7 +70,7 @@ interface CollaborationMessage {
 
       <header class="page-header">
         <div>
-          <p class="eyebrow">CU4 · WORKFLOW</p>
+          <p class="eyebrow">CU-07 / CU-08 · WORKFLOW</p>
           <h2>Diseñar Política de Negocio</h2>
           <p class="subtitle">
             Modela el flujo, configura formularios y controla si otros administradores de tu empresa pueden observar o editar en vivo.
@@ -77,12 +84,35 @@ interface CollaborationMessage {
             </span>
             <span class="presence" *ngIf="ownerDisplayName">Dueño: {{ ownerDisplayName }}</span>
           </div>
+          <p class="selected-policy" *ngIf="selectedPolicy">{{ selectedPolicyHeadline }}</p>
+          <div class="metrics-row">
+            <article class="metric-card">
+              <span>Políticas</span>
+              <strong>{{ policies.length }}</strong>
+            </article>
+            <article class="metric-card">
+              <span>Formularios</span>
+              <strong>{{ forms.length }}</strong>
+            </article>
+            <article class="metric-card">
+              <span>Campos</span>
+              <strong>{{ totalFieldCount }}</strong>
+            </article>
+          </div>
           <p class="collaboration-note">{{ collaborationStatus }}</p>
         </div>
         <div class="header-actions">
           <button class="secondary" type="button" (click)="resetWorkspace()">Nueva política</button>
           <button class="primary" type="button" [disabled]="!canEditCurrentPolicy" (click)="savePolicy()">Guardar ahora</button>
           <button class="primary" type="button" [disabled]="!selectedPolicy || !canEditCurrentPolicy" (click)="publishPolicy()">Publicar</button>
+          <button
+            class="danger"
+            type="button"
+            [disabled]="!selectedPolicy || !canDeleteSelectedPolicy || deleteInProgress"
+            (click)="confirmDeletePolicy()"
+          >
+            {{ deleteInProgress ? 'Eliminando...' : 'Eliminar política' }}
+          </button>
         </div>
       </header>
 
@@ -94,11 +124,18 @@ interface CollaborationMessage {
               <button class="ghost" type="button" (click)="loadPolicies()">Actualizar</button>
             </div>
 
+            <input
+              class="search-input"
+              [ngModel]="policySearch"
+              (ngModelChange)="policySearch = $event"
+              placeholder="Buscar política"
+            />
+
             <button class="primary block" type="button" (click)="resetWorkspace()">Nueva política</button>
 
             <div class="scroll-list">
               <button
-                *ngFor="let policy of policies"
+                *ngFor="let policy of filteredPolicies"
                 class="list-item"
                 [class.selected]="policy.id === selectedPolicy?.id"
                 type="button"
@@ -146,6 +183,70 @@ interface CollaborationMessage {
         </aside>
 
         <main class="editor-main">
+          <section class="panel ai-panel">
+            <div class="split-header">
+              <div>
+                <span class="eyebrow">CU-12 · IA</span>
+                <h3>Generar diagrama por prompt</h3>
+                <p class="section-help">
+                  Describe el trámite en lenguaje natural o usa dictado por voz. El resultado reemplaza el diagrama del borrador actual.
+                </p>
+              </div>
+              <span class="ai-status" [class.listening]="aiListening" [class.loading]="aiGenerating">
+                {{ aiStatusLabel }}
+              </span>
+            </div>
+
+            <div class="ai-grid">
+              <label class="stacked-field ai-prompt">
+                <span>Descripción del flujo</span>
+                <textarea
+                  [(ngModel)]="aiPrompt"
+                  [disabled]="!canEditCurrentPolicy || aiGenerating"
+                  rows="4"
+                  placeholder="Ej. Registrar solicitud, validar documentos, si falta información solicitar corrección, si está completo enviar a evaluación y cerrar."
+                ></textarea>
+              </label>
+
+              <label class="stacked-field">
+                <span>Contexto de negocio opcional</span>
+                <textarea
+                  [(ngModel)]="aiBusinessContext"
+                  [disabled]="!canEditCurrentPolicy || aiGenerating"
+                  rows="4"
+                  placeholder="Ej. Política de crédito, onboarding digital, actualización documental..."
+                ></textarea>
+              </label>
+            </div>
+
+            <div class="ai-actions">
+              <button class="secondary" type="button" [disabled]="!speechSupported || aiListening || !canEditCurrentPolicy" (click)="startVoicePrompt()">
+                Dictar por voz
+              </button>
+              <button class="secondary" type="button" [disabled]="!aiPrompt.trim() || aiGenerating" (click)="clearAiPrompt()">
+                Limpiar prompt
+              </button>
+              <button class="primary" type="button" [disabled]="!canGenerateWithAi" (click)="generateDiagramFromAi()">
+                {{ aiGenerating ? 'Generando...' : 'Generar y aplicar diagrama' }}
+              </button>
+            </div>
+
+            <div class="ai-result" *ngIf="aiDetectedSteps.length || aiWarnings.length">
+              <div *ngIf="aiDetectedSteps.length">
+                <strong>Pasos detectados</strong>
+                <ol>
+                  <li *ngFor="let step of aiDetectedSteps">{{ step }}</li>
+                </ol>
+              </div>
+              <div *ngIf="aiWarnings.length">
+                <strong>Advertencias</strong>
+                <ul>
+                  <li *ngFor="let warning of aiWarnings">{{ warning }}</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
           <section class="panel editor-panel">
             <div class="policy-meta">
               <input
@@ -302,9 +403,15 @@ interface CollaborationMessage {
         <aside class="sidebar right-sidebar">
           <section class="panel">
             <h3>Tareas humanas</h3>
+            <input
+              class="search-input"
+              [ngModel]="taskSearch"
+              (ngModelChange)="taskSearch = $event"
+              placeholder="Buscar tarea, rol o formulario"
+            />
             <div class="scroll-list">
               <button
-                *ngFor="let binding of taskBindings"
+                *ngFor="let binding of filteredTaskBindings"
                 class="list-item"
                 [class.selected]="binding.taskId === selectedTaskId"
                 type="button"
@@ -366,6 +473,10 @@ interface CollaborationMessage {
     h2, h3, h4, p { margin: 0; }
     .subtitle { margin-top: 0.4rem; color: #52607a; max-width: 60rem; }
     .status-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
+    .metrics-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin-top: 0.9rem; max-width: 30rem; }
+    .metric-card { border: 1px solid #dbe4f0; border-radius: 14px; padding: 0.55rem 0.7rem; background: #f8fbff; display: grid; gap: 0.15rem; }
+    .metric-card span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 700; }
+    .metric-card strong { font-size: 1.05rem; color: #0f172a; }
     .badge, .policy-badge, .save-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 0.32rem 0.8rem; font-size: 0.78rem; font-weight: 700; }
     .badge.private, .policy-badge.private { background: #eef2ff; color: #4338ca; }
     .badge.shared, .policy-badge.shared { background: #dcfce7; color: #166534; }
@@ -373,27 +484,40 @@ interface CollaborationMessage {
     .save-status.saving { background: #dbeafe; color: #1d4ed8; }
     .save-status.error { background: #fee2e2; color: #b91c1c; }
     .presence { color: #52607a; font-size: 0.84rem; }
+    .selected-policy { margin-top: 0.55rem; color: #0f172a; font-weight: 750; }
     .collaboration-note { margin-top: 0.65rem; color: #52607a; }
-    .header-actions { display: flex; gap: 0.75rem; align-items: center; }
-    .workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+    .header-actions { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; flex-wrap: wrap; flex: 0 0 auto; max-width: 22rem; }
+    .header-actions button { min-width: 8.2rem; }
+    .workspace { display: grid; grid-template-columns: 260px minmax(680px, 1fr) 260px; gap: 1rem; align-items: start; }
     .sidebar, .editor-main { min-width: 0; display: grid; gap: 1rem; }
     .panel { border: 1px solid #dbe4f0; border-radius: 26px; background: #ffffff; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06); padding: 1.2rem; display: grid; gap: 1rem; }
     .compact-panel { gap: 0.8rem; }
     .panel-header, .split-header, .editor-actions, .list-item-top { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
     .helper-copy, .section-help { color: #52607a; font-size: 0.92rem; line-height: 1.45; }
     .scroll-list, .forms-tabs { display: grid; gap: 0.75rem; max-height: 31rem; overflow: auto; padding-right: 0.15rem; }
+    .search-input { width: 100%; padding: 0.75rem 0.9rem; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; color: #0f172a; }
     .list-item { width: 100%; text-align: left; border: 1px solid #dbe4f0; background: #f8fbff; border-radius: 18px; padding: 0.9rem 1rem; display: grid; gap: 0.3rem; cursor: pointer; color: #0f172a; }
     .list-item.selected { border-color: #2563eb; background: #eff6ff; box-shadow: inset 0 0 0 1px #2563eb; }
     .list-item span { color: #52607a; font-size: 0.86rem; }
     .policy-meta, .field-grid, .form-meta-card { display: grid; gap: 0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .editor-panel { gap: 1rem; }
-    .canvas-wrapper { position: relative; min-height: 30rem; border-radius: 24px; overflow: hidden; border: 1px solid #dbe4f0; background: radial-gradient(circle at top left, #f8fbff, #eef5ff 55%, #ffffff); }
-    .canvas { height: 30rem; width: 100%; }
+    .canvas-wrapper { position: relative; min-height: 34rem; border-radius: 24px; overflow: hidden; border: 1px solid #dbe4f0; background: radial-gradient(circle at top left, #f8fbff, #eef5ff 55%, #ffffff); }
+    .canvas { height: 34rem; width: 100%; }
     .canvas-overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 0.35rem; background: rgba(248, 250, 252, 0.82); color: #0f172a; text-align: center; padding: 1rem; backdrop-filter: blur(2px); }
     .canvas-wrapper.read-only { border-style: dashed; }
     .xml-preview { width: 100%; border-radius: 18px; border: 1px solid #dbe4f0; padding: 1rem; font-family: Consolas, monospace; resize: vertical; color: #475569; background: #f8fafc; }
     .feedback { color: #0369a1; font-weight: 600; }
     .forms-panel { gap: 1rem; }
+    .ai-panel { background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%); }
+    .ai-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr); gap: 0.85rem; }
+    .ai-prompt textarea { min-height: 8rem; }
+    .ai-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 0.35rem 0.75rem; background: #eef2ff; color: #4338ca; font-size: 0.78rem; font-weight: 800; white-space: nowrap; }
+    .ai-status.listening { background: #fef3c7; color: #92400e; }
+    .ai-status.loading { background: #dcfce7; color: #166534; }
+    .ai-actions { display: flex; justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap; }
+    .ai-result { border: 1px solid #dbe4f0; border-radius: 18px; padding: 0.9rem 1rem; background: #f8fafc; display: grid; gap: 0.75rem; color: #334155; }
+    .ai-result ol, .ai-result ul { margin: 0.5rem 0 0; padding-left: 1.15rem; }
+    .ai-result li { margin: 0.25rem 0; }
     .form-builder { display: grid; gap: 1rem; }
     .form-builder-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 1rem; align-items: start; }
     .field-palette, .fields { display: grid; gap: 0.85rem; }
@@ -417,14 +541,24 @@ interface CollaborationMessage {
     .ghost { background: transparent; color: #0f766e; padding: 0; }
     .danger { background: #fee2e2; color: #b91c1c; justify-self: start; }
     .block { width: 100%; }
+    @media (max-width: 1500px) {
+      .workspace { grid-template-columns: 250px minmax(0, 1fr); }
+      .right-sidebar { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .right-sidebar .panel { align-content: start; }
+    }
     @media (max-width: 1180px) {
       .workspace { grid-template-columns: 1fr; }
       .form-builder-layout { grid-template-columns: 1fr; }
-      .right-sidebar { order: 3; }
+      .right-sidebar { order: 3; grid-template-columns: 1fr; }
     }
     @media (max-width: 768px) {
       .page-header { grid-template-columns: 1fr; display: grid; }
-      .header-actions { flex-wrap: wrap; }
+      .header-actions { justify-content: stretch; max-width: none; }
+      .header-actions button { width: 100%; }
+      .metrics-row { grid-template-columns: 1fr; max-width: 100%; }
+      .ai-grid { grid-template-columns: 1fr; }
+      .ai-actions { justify-content: stretch; }
+      .ai-actions button { width: 100%; }
       .policy-meta, .field-grid, .form-meta-card, .compact-grid { grid-template-columns: 1fr; }
       .canvas { height: 24rem; }
     }
@@ -449,6 +583,17 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
   saveStatus: SaveStatus = 'saved';
   collaborationEnabled = false;
   collaborationMode: CollaborationMode = 'PRIVATE';
+  policySearch = '';
+  taskSearch = '';
+  aiPrompt = '';
+  aiBusinessContext = '';
+  aiGenerating = false;
+  aiListening = false;
+  aiDetectedSteps: string[] = [];
+  aiWarnings: string[] = [];
+  deleteInProgress = false;
+  private routeSub: Subscription | null = null;
+  private pendingPolicyId: string | null = null;
 
   readonly fieldPalette: FieldPaletteItem[] = [
     { label: 'Texto', description: 'Entrada simple de una línea', type: 'text' },
@@ -483,7 +628,9 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
   constructor(
     private readonly policyService: PolicyService,
     private readonly departmentService: DepartmentService,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly route: ActivatedRoute,
+    private readonly router: Router
   ) {}
 
   get selectedTaskBinding(): TaskBinding | null {
@@ -511,6 +658,31 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
 
   get canManageCollaboration(): boolean {
     return !this.selectedPolicy || this.isOwner;
+  }
+
+  /**
+   * Misma regla que backend: dueño de la política o administrador de la empresa.
+   */
+  get canDeleteSelectedPolicy(): boolean {
+    if (!this.selectedPolicy?.id) {
+      return false;
+    }
+    // `ownerUserId` puede llegar vacío en la lista inicial; `isOwner` ya cubre ese caso.
+    if (this.isOwner) {
+      return true;
+    }
+    const roles = this.authService.currentUserValue?.roles ?? [];
+    return roles.includes('ROLE_ADMIN') || roles.includes('ADMIN');
+  }
+
+  get selectedPolicyHeadline(): string {
+    if (!this.selectedPolicy) {
+      return 'Nueva política (borrador)';
+    }
+    const name = this.selectedPolicy.name || this.name || 'Sin nombre';
+    const status = this.selectedPolicy.status || 'DRAFT';
+    const version = this.selectedPolicy.version ?? 1;
+    return `${name} · ${status} · v${version}`;
   }
 
   get collaborationModeLabel(): string {
@@ -549,6 +721,55 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  get filteredPolicies(): Policy[] {
+    const term = this.policySearch.trim().toLowerCase();
+    if (!term) {
+      return this.policies;
+    }
+    return this.policies.filter(policy =>
+      (policy.name ?? '').toLowerCase().includes(term) ||
+      (policy.description ?? '').toLowerCase().includes(term)
+    );
+  }
+
+  get filteredTaskBindings(): TaskBinding[] {
+    const term = this.taskSearch.trim().toLowerCase();
+    if (!term) {
+      return this.taskBindings;
+    }
+    return this.taskBindings.filter(binding =>
+      binding.taskName.toLowerCase().includes(term) ||
+      binding.departmentRole.toLowerCase().includes(term) ||
+      this.resolveFormName(binding.formId).toLowerCase().includes(term)
+    );
+  }
+
+  get totalFieldCount(): number {
+    return this.forms.reduce((acc, form) => acc + form.fields.length, 0);
+  }
+
+  get speechSupported(): boolean {
+    const browserWindow = window as typeof window & {
+      SpeechRecognition?: unknown;
+      webkitSpeechRecognition?: unknown;
+    };
+    return !!browserWindow.SpeechRecognition || !!browserWindow.webkitSpeechRecognition;
+  }
+
+  get aiStatusLabel(): string {
+    if (this.aiGenerating) {
+      return 'Generando';
+    }
+    if (this.aiListening) {
+      return 'Escuchando';
+    }
+    return this.speechSupported ? 'Texto o voz' : 'Texto';
+  }
+
+  get canGenerateWithAi(): boolean {
+    return this.canEditCurrentPolicy && !this.aiGenerating && this.aiPrompt.trim().length >= 5;
+  }
+
   async ngAfterViewInit(): Promise<void> {
     this.modeler = new Modeler({
       container: this.canvasRef.nativeElement
@@ -556,6 +777,15 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
 
     this.attachSelectionListener();
     this.startAutosaveLoop();
+    this.routeSub = this.route.queryParamMap.subscribe(map => {
+      this.pendingPolicyId = map.get('policyId');
+      if (this.pendingPolicyId && this.policies.length) {
+        const found = this.policies.find(p => p.id === this.pendingPolicyId);
+        if (found && this.selectedPolicy?.id !== found.id) {
+          void this.selectPolicy(found);
+        }
+      }
+    });
     this.loadPolicies();
     this.loadDepartments();
     await this.importXml(this.blankDiagram);
@@ -563,6 +793,10 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.routeSub) {
+      this.routeSub.unsubscribe();
+      this.routeSub = null;
+    }
     if (this.autosaveHandle) {
       clearInterval(this.autosaveHandle);
       this.autosaveHandle = null;
@@ -581,6 +815,12 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.policyService.getPolicies().subscribe({
       next: policies => {
         this.policies = policies;
+        if (this.pendingPolicyId) {
+          const found = policies.find(p => p.id === this.pendingPolicyId);
+          if (found) {
+            void this.selectPolicy(found);
+          }
+        }
       },
       error: () => {
         this.feedback = 'No se pudo cargar el catálogo de políticas.';
@@ -602,6 +842,12 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
   async selectPolicy(policy: Policy): Promise<void> {
     this.disconnectCollaboration();
     this.selectedPolicy = { ...policy };
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { policyId: policy.id },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
     this.name = policy.name ?? '';
     this.description = policy.description ?? '';
     this.forms = this.cloneForms(policy.forms ?? []);
@@ -642,6 +888,114 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
         this.feedback = err.error?.message ?? 'No se pudo publicar la política.';
       }
     });
+  }
+
+  confirmDeletePolicy(): void {
+    if (!this.selectedPolicy || !this.canDeleteSelectedPolicy || this.deleteInProgress) {
+      return;
+    }
+    const policyName = this.selectedPolicy.name || 'esta política';
+    const message =
+      `¿Eliminar permanentemente "${policyName}"?\n\n` +
+      'Se borrarán instancias de trámite, tareas, documentos adjuntos y versiones publicadas del workflow. ' +
+      'Los formularios definidos solo en esta política se pierden con ella. Esta acción no se puede deshacer.';
+    if (!confirm(message)) {
+      return;
+    }
+    const id = this.selectedPolicy.id;
+    this.deleteInProgress = true;
+    this.feedback = 'Eliminando política y datos relacionados...';
+    this.policyService.deletePolicy(id).subscribe({
+      next: () => {
+        this.deleteInProgress = false;
+        this.policies = this.policies.filter(p => p.id !== id);
+        this.disconnectCollaboration();
+        void this.resetWorkspace();
+        this.feedback = 'Política eliminada correctamente.';
+      },
+      error: err => {
+        this.deleteInProgress = false;
+        if (err.status === 403) {
+          this.feedback = 'No tienes permiso para eliminar esta política (solo el dueño o un administrador de la empresa).';
+        } else {
+          this.feedback = err.error?.message ?? 'No se pudo eliminar la política.';
+        }
+      }
+    });
+  }
+
+  generateDiagramFromAi(): void {
+    if (!this.canGenerateWithAi) {
+      this.feedback = 'Describe el trámite con al menos 5 caracteres para generar el diagrama.';
+      return;
+    }
+
+    this.aiGenerating = true;
+    this.aiWarnings = [];
+    this.aiDetectedSteps = [];
+    this.feedback = 'Generando diagrama desde IA...';
+
+    this.policyService.generateDiagramFromPrompt({
+      prompt: this.aiPrompt.trim(),
+      business_context: this.aiBusinessContext.trim() || undefined,
+      output_format: 'bpmn'
+    }).subscribe({
+      next: response => {
+        void this.applyGeneratedDiagram(response);
+      },
+      error: err => {
+        this.aiGenerating = false;
+        this.feedback = err.status === 0
+          ? 'No se pudo conectar con el servicio de IA en http://localhost:8090. Verifica que esté iniciado y accesible.'
+          : err.error?.message ?? 'No se pudo generar el diagrama con IA.';
+      }
+    });
+  }
+
+  startVoicePrompt(): void {
+    if (!this.speechSupported || !this.canEditCurrentPolicy) {
+      this.feedback = 'El dictado por voz no está disponible en este navegador.';
+      return;
+    }
+
+    const browserWindow = window as typeof window & {
+      SpeechRecognition?: new () => any;
+      webkitSpeechRecognition?: new () => any;
+    };
+    const SpeechRecognition = browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-ES';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    this.aiListening = true;
+    this.feedback = 'Escuchando descripción del flujo...';
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript ?? '';
+      this.aiPrompt = `${this.aiPrompt ? `${this.aiPrompt.trim()} ` : ''}${transcript}`.trim();
+      this.feedback = 'Dictado agregado al prompt.';
+    };
+
+    recognition.onerror = () => {
+      this.feedback = 'No se pudo capturar audio. Revisa permisos del micrófono e intenta nuevamente.';
+    };
+
+    recognition.onend = () => {
+      this.aiListening = false;
+    };
+
+    recognition.start();
+  }
+
+  clearAiPrompt(): void {
+    this.aiPrompt = '';
+    this.aiBusinessContext = '';
+    this.aiDetectedSteps = [];
+    this.aiWarnings = [];
   }
 
   async exportXml(): Promise<void> {
@@ -766,6 +1120,12 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.hasPendingChanges = true;
     this.saveStatus = 'unsaved';
     this.collaborationStatus = 'Esta política nueva se autosalvará como borrador, por ejemplo Sin nombre 1.';
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { policyId: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
     await this.importXml(this.blankDiagram);
     this.xmlPreview = this.blankDiagram;
   }
@@ -930,6 +1290,139 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     await this.modeler.importXML(xml);
     const canvas = this.modeler.get('canvas') as any;
     canvas.zoom('fit-viewport');
+  }
+
+  private async applyGeneratedDiagram(response: DiagramGenerationResponse): Promise<void> {
+    try {
+      if (!response.success || !response.generated_structure?.nodes?.length) {
+        this.feedback = 'La IA no devolvió una estructura de diagrama válida.';
+        return;
+      }
+
+      const visualXml = this.buildVisualBpmnFromGeneratedStructure(response.generated_structure.nodes, response.generated_structure.flows);
+      await this.importXml(visualXml);
+      this.xmlPreview = visualXml;
+      this.syncTasksFromXml(visualXml);
+      this.aiDetectedSteps = response.detected_steps.map(step =>
+        String(step['label'] ?? step['text'] ?? step['id'] ?? 'Paso detectado')
+      );
+      this.aiWarnings = response.warnings ?? [];
+
+      if (!this.name.trim()) {
+        this.name = this.suggestPolicyNameFromPrompt(this.aiPrompt);
+      }
+
+      this.feedback = 'Diagrama generado por IA y aplicado al diseñador. Revisa tareas humanas, departamentos y formularios antes de publicar.';
+      this.markDirty();
+    } catch {
+      this.saveStatus = 'error';
+      this.feedback = 'La IA generó una respuesta, pero no se pudo cargar como diagrama BPMN visual.';
+    } finally {
+      this.aiGenerating = false;
+    }
+  }
+
+  private buildVisualBpmnFromGeneratedStructure(nodes: GeneratedDiagramNode[], flows: GeneratedDiagramFlow[]): string {
+    const shapeWidth = (node: GeneratedDiagramNode) => node.type === 'START' || node.type === 'END' ? 36 : node.type === 'DECISION' || node.type === 'PARALLEL' ? 50 : 130;
+    const shapeHeight = (node: GeneratedDiagramNode) => node.type === 'START' || node.type === 'END' ? 36 : node.type === 'DECISION' || node.type === 'PARALLEL' ? 50 : 76;
+    const positions = new Map<string, { x: number; y: number; width: number; height: number }>();
+
+    nodes.forEach((node, index) => {
+      const width = shapeWidth(node);
+      const height = shapeHeight(node);
+      positions.set(node.id, {
+        x: 120 + index * 190,
+        y: 180 - height / 2,
+        width,
+        height
+      });
+    });
+
+    const processItems = nodes.map(node => this.renderBpmnNode(node)).join('\n');
+    const flowItems = flows.map(flow =>
+      `    <bpmn:sequenceFlow id="${this.escapeXml(flow.id)}" sourceRef="${this.escapeXml(flow.source)}" targetRef="${this.escapeXml(flow.target)}" />`
+    ).join('\n');
+
+    const shapeItems = nodes.map(node => {
+      const bounds = positions.get(node.id);
+      if (!bounds) {
+        return '';
+      }
+      const marker = node.type === 'DECISION' || node.type === 'PARALLEL' ? ' isMarkerVisible="true"' : '';
+      return `      <bpmndi:BPMNShape id="Shape_${this.escapeXml(node.id)}" bpmnElement="${this.escapeXml(node.id)}"${marker}>
+        <dc:Bounds x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" />
+      </bpmndi:BPMNShape>`;
+    }).join('\n');
+
+    const edgeItems = flows.map(flow => {
+      const source = positions.get(flow.source);
+      const target = positions.get(flow.target);
+      if (!source || !target) {
+        return '';
+      }
+      const sourceX = source.x + source.width;
+      const sourceY = source.y + source.height / 2;
+      const targetX = target.x;
+      const targetY = target.y + target.height / 2;
+      return `      <bpmndi:BPMNEdge id="Edge_${this.escapeXml(flow.id)}" bpmnElement="${this.escapeXml(flow.id)}">
+        <di:waypoint x="${sourceX}" y="${sourceY}" />
+        <di:waypoint x="${targetX}" y="${targetY}" />
+      </bpmndi:BPMNEdge>`;
+    }).join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_Generated"
+                  targetNamespace="https://workflow-cloud.local/bpmn">
+  <bpmn:process id="Process_Generated" name="Workflow generado por IA" isExecutable="true">
+${processItems}
+${flowItems}
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Generated">
+    <bpmndi:BPMNPlane id="BPMNPlane_Generated" bpmnElement="Process_Generated">
+${shapeItems}
+${edgeItems}
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+  }
+
+  private renderBpmnNode(node: GeneratedDiagramNode): string {
+    const id = this.escapeXml(node.id);
+    const name = this.escapeXml(node.label || node.id);
+    switch (node.type) {
+      case 'START':
+        return `    <bpmn:startEvent id="${id}" name="${name}" />`;
+      case 'END':
+        return `    <bpmn:endEvent id="${id}" name="${name}" />`;
+      case 'DECISION':
+        return `    <bpmn:exclusiveGateway id="${id}" name="${name}" />`;
+      case 'PARALLEL':
+        return `    <bpmn:parallelGateway id="${id}" name="${name}" />`;
+      default:
+        return `    <bpmn:userTask id="${id}" name="${name}" />`;
+    }
+  }
+
+  private suggestPolicyNameFromPrompt(prompt: string): string {
+    const normalized = prompt.trim().replace(/\s+/g, ' ');
+    if (!normalized) {
+      return 'Política generada por IA';
+    }
+    return normalized.length > 48
+      ? `${normalized.slice(0, 48)}...`
+      : normalized;
+  }
+
+  private escapeXml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   private syncTasksFromXml(xml: string): void {

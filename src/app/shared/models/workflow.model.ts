@@ -201,6 +201,12 @@ export interface CorrectionResult {
   nodoDevueltoNombre: string;
 }
 
+export interface CorrectionTarget {
+  nodeId: string;
+  nodeName?: string;
+  nodeType?: string;
+}
+
 export interface ProcessSearchResult {
   instanciaId: string;
   policyName: string;

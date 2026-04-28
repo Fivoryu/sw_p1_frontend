@@ -51,7 +51,7 @@
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -84,6 +84,34 @@
 .panel-heading h3 {
   margin: 6px 0 0;
   font-size: 24px;
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-input,
+.filter-select {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  color: #0f172a;
+  font: inherit;
+}
+
+.filter-input {
+  min-width: min(320px, 100%);
 }
 
 .use-case-grid {
@@ -261,6 +289,10 @@
   .stats-grid,
   .use-case-grid {
     grid-template-columns: 1fr;
+  }
+
+  .filter-input {
+    min-width: 100%;
   }
 
   .policy-title-row {

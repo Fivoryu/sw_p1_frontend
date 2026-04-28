@@ -3,6 +3,15 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../../services/auth.service';
 import { PolicyService, BusinessPolicy } from '../../../services/policy.service';
 
+interface AdminUseCase {
+  id: string;
+  name: string;
+  description: string;
+  status: 'completed' | 'in-progress';
+  route?: string;
+  action?: string;
+}
+
 /**
  * Dashboard del Administrador
  * Muestra un resumen de todas las funcionalidades del Ciclo 1
@@ -17,50 +26,66 @@ export class AdminDashboardComponent implements OnInit {
   policies: BusinessPolicy[] = [];
   loading = true;
   error: string | null = null;
+  policySearch = '';
+  policyStatusFilter = 'ALL';
 
   // Ciclo 1 - Casos de Uso
-  usesCases = [
+  usesCases: AdminUseCase[] = [
     {
-      id: 'CU1',
-      name: 'Iniciar Sesión',
-      description: 'Autenticación del administrador',
+      id: 'CU-04',
+      name: 'Gestionar Usuarios',
+      description: 'Administración del acceso por empresa y rol',
       status: 'completed',
       route: '/admin/dashboard'
     },
     {
-      id: 'CU2',
-      name: 'Cerrar Sesión',
-      description: 'Logout del usuario',
+      id: 'CU-05',
+      name: 'Roles y permisos',
+      description: 'Gobernanza de permisos y perfiles operativos',
       status: 'completed',
-      action: 'logout'
+      route: '/admin/dashboard'
     },
     {
-      id: 'CU3',
+      id: 'CU-07',
       name: 'Gestionar Políticas de Negocio',
-      description: 'CRUD de políticas',
+      description: 'Catálogo, versiones, borradores y publicación',
       status: 'completed',
       route: '/admin/policies'
     },
     {
-      id: 'CU4',
+      id: 'CU-08',
       name: 'Diseñar Diagrama de Actividades',
       description: 'BPMN workflow designer',
       status: 'completed',
       route: '/admin/workflows'
     },
     {
-      id: 'CU6',
+      id: 'CU-10',
       name: 'Gestionar Formularios Dinámicos',
       description: 'Form builder integrado al diseñador de políticas',
       status: 'in-progress',
       route: '/admin/policies'
     },
     {
-      id: 'CU7',
+      id: 'CU-06',
       name: 'Gestionar Departamentos',
       description: 'Catálogo global de departamentos y roles',
       status: 'completed',
       route: '/admin/departments'
+    },
+    {
+      id: 'CU-09',
+      name: 'Edición colaborativa',
+      description: 'Trabajo compartido por WebSocket en políticas',
+      status: 'completed',
+      route: '/admin/policies'
+    },
+    {
+      id: 'CU-11/12',
+      name: 'OCR y generación por prompt',
+      description: 'Carga por imagen y base BPMN asistida',
+      status: 'in-progress',
+      route: '/admin/policies'
     }
   ];
 
@@ -104,8 +129,8 @@ export class AdminDashboardComponent implements OnInit {
   /**
    * Navega a un caso de uso
    */
-  navigateTo(route: string): void {
-    this.router.navigate([route]);
+  navigateTo(route: string, queryParams?: Record<string, string>): void {
+    this.router.navigate([route], queryParams ? { queryParams } : undefined);
   }
 
   /**
@@ -130,5 +155,20 @@ export class AdminDashboardComponent implements OnInit {
 
   get draftPoliciesCount(): number {
     return this.policies.filter(policy => policy.status === 'DRAFT').length;
+  }
+
+  get archivedPoliciesCount(): number {
+    return this.policies.filter(policy => policy.status === 'ARCHIVED').length;
+  }
+
+  get filteredPolicies(): BusinessPolicy[] {
+    const term = this.policySearch.trim().toLowerCase();
+    return this.policies.filter(policy => {
+      const matchesSearch = !term ||
+        policy.name.toLowerCase().includes(term) ||
+        (policy.description ?? '').toLowerCase().includes(term);
+      const matchesStatus = this.policyStatusFilter === 'ALL' || policy.status === this.policyStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
   }
 }

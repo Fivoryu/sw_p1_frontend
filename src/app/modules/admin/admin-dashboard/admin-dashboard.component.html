@@ -25,6 +25,10 @@
         <strong class="stat-value">{{ draftPoliciesCount }}</strong>
       </article>
       <article class="stat-card">
+        <span class="stat-label">Archivadas</span>
+        <strong class="stat-value">{{ archivedPoliciesCount }}</strong>
+      </article>
+      <article class="stat-card">
         <span class="stat-label">Usuario activo</span>
         <strong class="stat-value">{{ currentUser?.username }}</strong>
       </article>
@@ -78,6 +82,21 @@
           <span class="eyebrow">Catálogo</span>
           <h3>Políticas registradas</h3>
         </div>
+        <div class="filters">
+          <input
+            [value]="policySearch"
+            (input)="policySearch = $any($event.target).value"
+            class="filter-input"
+            placeholder="Buscar por nombre o descripción"
+          />
+          <select [value]="policyStatusFilter" (change)="policyStatusFilter = $any($event.target).value" class="filter-select">
+            <option value="ALL">Todos los estados</option>
+            <option value="DRAFT">Borrador</option>
+            <option value="PUBLISHED">Publicada</option>
+            <option value="ARCHIVED">Archivada</option>
+            <option value="DEPRECATED">Deprecada</option>
+          </select>
+        </div>
       </div>
 
       <div *ngIf="loading" class="info-box">Cargando políticas...</div>
@@ -87,8 +106,12 @@
         Aún no hay políticas registradas. Crea la primera desde el diseñador.
       </div>
 
-      <div *ngIf="!loading && policies.length > 0" class="policy-list">
-        <article class="policy-card" *ngFor="let policy of policies">
+      <div *ngIf="!loading && policies.length > 0 && filteredPolicies.length === 0" class="empty-box">
+        No hay coincidencias para el filtro aplicado.
+      </div>
+
+      <div *ngIf="!loading && filteredPolicies.length > 0" class="policy-list">
+        <article class="policy-card" *ngFor="let policy of filteredPolicies">
           <div class="policy-main">
             <div class="policy-title-row">
               <h4>{{ policy.name }}</h4>
@@ -100,7 +123,7 @@
           </div>
           <div class="policy-meta">
             <span>Versión {{ policy.version }}</span>
-            <button class="btn btn-secondary" (click)="navigateTo('/admin/policies')">Editar</button>
+            <button class="btn btn-secondary" (click)="navigateTo('/admin/policies', { policyId: policy.id })">Editar</button>
           </div>
         </article>
       </div>

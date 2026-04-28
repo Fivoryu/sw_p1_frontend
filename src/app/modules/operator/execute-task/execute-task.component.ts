@@ -3,8 +3,9 @@ import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DynamicFormComponent } from '../dynamic-form/dynamic-form.component';
-import { TaskDetail } from '../../../shared/models/workflow.model';
+import { CorrectionTarget, TaskDetail } from '../../../shared/models/workflow.model';
 import { WorkflowService } from '../../../shared/services/workflow.service';
+import { WorkflowAiService, OcrDocumentResponse } from '../../../services/workflow-ai.service';
 
 @Component({
   selector: 'app-execute-task',
@@ -87,6 +88,25 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
                 <span class="mini-chip">{{ document.estado || 'UPLOADED' }}</span>
               </article>
             </section>
+
+            <section class="panel-section">
+              <h3>OCR (texto)</h3>
+              <p class="muted">Pega el texto del documento (demo) para extraer campos y prellenar el formulario.</p>
+              <textarea class="ocr-text" [(ngModel)]="ocrTextHint" rows="6" placeholder="DNI: 12345678&#10;Nombre: Juan Pérez&#10;Monto: 10000"></textarea>
+              <button class="secondary-btn" type="button" (click)="runOcr()" [disabled]="ocrLoading || !ocrTextHint.trim()">
+                {{ ocrLoading ? 'Analizando...' : 'Ejecutar OCR' }}
+              </button>
+              <div *ngIf="ocrResult" class="ocr-result">
+                <span class="muted">Tipo: <strong>{{ ocrResult.document_type }}</strong> · Confianza: <strong>{{ ocrResult.confidence }}</strong></span>
+                <div class="summary-box" *ngIf="ocrFieldsEntries().length">
+                  <div class="summary-entry" *ngFor="let entry of ocrFieldsEntries()">
+                    <span>{{ entry.key }}</span>
+                    <strong>{{ entry.value }}</strong>
+                  </div>
+                </div>
+                <button class="primary-btn" type="button" (click)="applyOcrToForm()" [disabled]="!ocrFieldsEntries().length">Aplicar al formulario</button>
+              </div>
+            </section>
           </aside>
 
           <main class="form-panel">
@@ -125,12 +145,19 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
 
               <section class="correction-box">
                 <h4>Solicitar corrección</h4>
+                <label class="target-label" *ngIf="correctionTargets.length">Devolver a</label>
+                <select class="target-select" *ngIf="correctionTargets.length" [(ngModel)]="correctionTargetNodeId">
+                  <option value="">Último paso humano previo</option>
+                  <option *ngFor="let target of correctionTargets" [value]="target.nodeId">
+                    {{ target.nodeName || target.nodeId }} ({{ target.nodeType || 'UserTask' }})
+                  </option>
+                </select>
                 <textarea [(ngModel)]="correctionReason" rows="3" placeholder="Describe por qué este trámite debe volver a un paso anterior"></textarea>
               </section>
 
               <div class="actions">
-                <button class="warning-btn" type="button" [disabled]="!detail.canEdit" (click)="requestCorrection()">Solicitar corrección</button>
-                <button class="primary-btn" type="button" [disabled]="!detail.canEdit" (click)="derivar()">Derivar trámite</button>
+                <button class="warning-btn" type="button" [disabled]="!detail.canEdit || !correctionReason.trim()" (click)="requestCorrection()">Solicitar corrección</button>
+                <button class="primary-btn" type="button" [disabled]="!detail.canEdit || !isCurrentFormValid(detail)" (click)="derivar()">Derivar trámite</button>
               </div>
             </section>
           </main>
@@ -183,10 +210,14 @@ import { WorkflowService } from '../../../shared/services/workflow.service';
     .panel-top p { margin: 0; color: #64748b; }
     .readonly-section h4, .correction-box h4 { margin: 0; }
     .previous-form-card, .correction-box { border: 1px solid #dbe4f0; border-radius: 18px; padding: 14px; background: #f8fafc; display: grid; gap: 10px; }
+    .target-label { font-size: 12px; font-weight: 800; color: #334155; }
+    .target-select { width: 100%; border: 1px solid #cbd5e1; border-radius: 14px; padding: 10px 12px; background: #fff; }
     .previous-top, .document-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
     .document-row { padding: 10px 12px; border-radius: 14px; background: #f8fafc; }
     .document-row div { display: grid; }
     .correction-box textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 14px; padding: 12px; resize: vertical; }
+    .ocr-text { width: 100%; border: 1px solid #cbd5e1; border-radius: 14px; padding: 12px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; }
+    .ocr-result { display: grid; gap: 10px; }
     .status-chip, .priority-chip, .mini-chip { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; }
     .status-chip { background: #dbeafe; color: #1d4ed8; }
     .status-chip.claim { background: #ffedd5; color: #9a3412; }
@@ -213,11 +244,17 @@ export class ExecuteTaskComponent implements OnInit {
   taskDetail: TaskDetail | null = null;
   formValues: Record<string, unknown> = {};
   correctionReason = '';
+  correctionTargets: CorrectionTarget[] = [];
+  correctionTargetNodeId = '';
+  ocrTextHint = '';
+  ocrLoading = false;
+  ocrResult: OcrDocumentResponse | null = null;
   feedback = '';
   loading = true;
 
   constructor(
     private workflowService: WorkflowService,
+    private workflowAiService: WorkflowAiService,
     private router: Router,
     private route: ActivatedRoute
   ) {}
@@ -229,6 +266,7 @@ export class ExecuteTaskComponent implements OnInit {
       ?? historyState?.taskDetail;
     if (detail) {
       this.applyDetail(detail);
+      this.loadCorrectionTargets(detail.tarea.id);
     }
 
     this.route.paramMap.subscribe(params => {
@@ -321,7 +359,13 @@ export class ExecuteTaskComponent implements OnInit {
     if (!this.taskDetail) {
       return;
     }
-    this.workflowService.requestOperatorTaskCorrection(this.taskDetail.tarea.id, this.correctionReason).subscribe({
+    const motivo = this.correctionReason.trim();
+    if (!motivo) {
+      this.feedback = 'Debes ingresar un motivo para solicitar la corrección.';
+      return;
+    }
+    const targetNodeId = this.correctionTargetNodeId?.trim() || null;
+    this.workflowService.requestOperatorTaskCorrectionTo(this.taskDetail.tarea.id, motivo, targetNodeId).subscribe({
       next: result => {
         this.feedback = `${result.message}. Devuelto a ${result.nodoDevueltoNombre}.`;
         this.router.navigate(['/operator/history'], { queryParams: { instance: result.instanciaId } });
@@ -336,6 +380,11 @@ export class ExecuteTaskComponent implements OnInit {
     if (!this.taskDetail) {
       return;
     }
+    const missingFields = this.missingRequiredFields(this.taskDetail);
+    if (missingFields.length) {
+      this.feedback = `Completa los campos obligatorios antes de derivar: ${missingFields.join(', ')}.`;
+      return;
+    }
     this.workflowService.completeOperatorTask(this.taskDetail.tarea.id, this.formValues).subscribe({
       next: result => {
         this.feedback = result.message;
@@ -347,11 +396,29 @@ export class ExecuteTaskComponent implements OnInit {
     });
   }
 
+  isCurrentFormValid(detail: TaskDetail): boolean {
+    return this.missingRequiredFields(detail).length === 0;
+  }
+
+  private missingRequiredFields(detail: TaskDetail): string[] {
+    return (detail.formulario?.fields ?? [])
+      .filter(field => field.required)
+      .filter(field => {
+        const value = this.formValues[field.name];
+        if (field.type === 'checkbox') {
+          return value !== true;
+        }
+        return value === undefined || value === null || String(value).trim() === '';
+      })
+      .map(field => field.label);
+  }
+
   private loadTask(taskId: string): void {
     this.loading = true;
     this.workflowService.getOperatorTaskDetail(taskId).subscribe({
       next: detail => {
         this.applyDetail(detail);
+        this.loadCorrectionTargets(detail.tarea.id);
         this.loading = false;
       },
       error: error => {
@@ -371,6 +438,58 @@ export class ExecuteTaskComponent implements OnInit {
       ...(detail.datosActuales ?? {}),
       ...(detail.borradorActual ?? {})
     };
+    // targets se recalculan por tarea; reset selección por seguridad
+    this.correctionTargets = [];
+    this.correctionTargetNodeId = '';
+    // OCR es asistido por texto y depende del contexto actual
+    this.ocrTextHint = '';
+    this.ocrResult = null;
+    this.ocrLoading = false;
     this.loading = false;
+  }
+
+  private loadCorrectionTargets(taskId: string): void {
+    this.workflowService.listOperatorCorrectionTargets(taskId).subscribe({
+      next: targets => {
+        this.correctionTargets = targets ?? [];
+      },
+      error: () => {
+        this.correctionTargets = [];
+      }
+    });
+  }
+
+  runOcr(): void {
+    if (!this.ocrTextHint.trim()) return;
+    this.ocrLoading = true;
+    this.ocrResult = null;
+    this.workflowAiService.extractDocument(this.ocrTextHint).subscribe({
+      next: res => {
+        this.ocrResult = res;
+        this.ocrLoading = false;
+        if (res.warnings?.length) {
+          this.feedback = res.warnings.join(' | ');
+        }
+      },
+      error: err => {
+        this.ocrLoading = false;
+        this.feedback = err?.error?.message ?? 'No se pudo ejecutar OCR';
+      }
+    });
+  }
+
+  ocrFieldsEntries(): Array<{ key: string; value: string }> {
+    const fields = this.ocrResult?.extracted_data?.fields ?? {};
+    if (!fields || typeof fields !== 'object') return [];
+    return Object.entries(fields)
+      .slice(0, 10)
+      .map(([key, value]) => ({ key, value: String(value) }));
+  }
+
+  applyOcrToForm(): void {
+    const fields = this.ocrResult?.extracted_data?.fields ?? null;
+    if (!fields || typeof fields !== 'object') return;
+    this.formValues = { ...this.formValues, ...(fields as Record<string, unknown>) };
+    this.feedback = 'Campos OCR aplicados al formulario. Revisa y guarda/deriva cuando corresponda.';
   }
 }
