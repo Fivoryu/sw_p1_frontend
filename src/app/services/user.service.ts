@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 export interface AdminUser {
   id: string;
@@ -33,7 +34,7 @@ export interface UpdateUserRequest {
   providedIn: 'root'
 })
 export class UserService {
-  private apiUrl = 'http://localhost:8080/api/v1/users';
+  private apiUrl = `${runtimeConfig.apiV1BaseUrl}/users`;
 
   constructor(private http: HttpClient) {}
 

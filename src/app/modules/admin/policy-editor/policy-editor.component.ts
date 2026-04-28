@@ -946,7 +946,7 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
       error: err => {
         this.aiGenerating = false;
         this.feedback = err.status === 0
-          ? 'No se pudo conectar con el servicio de IA en http://localhost:8090. Verifica que esté iniciado y accesible.'
+          ? 'No se pudo conectar con el servicio de IA configurado. Verifica que esté iniciado y accesible.'
           : err.error?.message ?? 'No se pudo generar el diagrama con IA.';
       }
     });

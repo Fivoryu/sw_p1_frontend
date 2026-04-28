@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { DepartmentDefinition, FormDefinition, Policy } from '../shared/models/workflow.model';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 /**
  * CU3: Gestionar Políticas de Negocio
@@ -56,8 +57,8 @@ export interface DiagramGenerationResponse {
   providedIn: 'root'
 })
 export class PolicyService {
-  private apiUrl = 'http://localhost:8080/api/v1/policies';
-  private aiDiagramUrl = 'http://localhost:8090/diagrams/generate';
+  private apiUrl = `${runtimeConfig.apiV1BaseUrl}/policies`;
+  private aiDiagramUrl = `${runtimeConfig.aiServiceBaseUrl}/v1/diagram/generate`;
 
   constructor(private http: HttpClient) {}
 

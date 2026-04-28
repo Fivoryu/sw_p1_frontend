@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 /**
  * CU4: Diseñar Diagrama de Actividades
@@ -29,7 +30,7 @@ export interface CreateWorkflowRequest {
   providedIn: 'root'
 })
 export class WorkflowService {
-  private apiUrl = 'http://localhost:8080/api/v1';
+  private apiUrl = runtimeConfig.apiV1BaseUrl;
 
   constructor(private http: HttpClient) {}
 

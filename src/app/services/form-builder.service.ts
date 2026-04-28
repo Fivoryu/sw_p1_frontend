@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 /**
  * CU6: Gestionar Formularios Dinámicos
@@ -41,7 +42,7 @@ export interface CreateFormRequest {
   providedIn: 'root'
 })
 export class FormBuilderService {
-  private apiUrl = 'http://localhost:8080/api';
+  private apiUrl = runtimeConfig.apiBaseUrl;
 
   constructor(private http: HttpClient) {}
 

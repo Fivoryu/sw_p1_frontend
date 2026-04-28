@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 export interface BottleneckRequest {
   workflow: {
@@ -26,7 +27,7 @@ export interface OcrDocumentResponse {
   providedIn: 'root'
 })
 export class WorkflowAiService {
-  private apiUrl = 'http://localhost:8080/api/v1/ai';
+  private apiUrl = `${runtimeConfig.apiV1BaseUrl}/ai`;
 
   constructor(private http: HttpClient) {}
 

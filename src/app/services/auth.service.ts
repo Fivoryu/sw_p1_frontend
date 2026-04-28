@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { runtimeConfig } from '../shared/config/runtime-config';
 
 export interface LoginRequest {
   username: string;
@@ -32,7 +33,7 @@ export interface ForgotPasswordResponse {
   providedIn: 'root'
 })
 export class AuthService {
-  private apiUrl = 'http://localhost:8080/api/v1/auth';
+  private apiUrl = `${runtimeConfig.apiV1BaseUrl}/auth`;
   private currentUserSubject: BehaviorSubject<AuthUser | null>;
   public currentUser: Observable<AuthUser | null>;
   private tokenKey = 'auth_token';

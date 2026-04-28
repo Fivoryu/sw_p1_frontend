@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { runtimeConfig } from '../config/runtime-config';
 import {
   CorrectionResult,
   CorrectionTarget,
@@ -19,7 +20,7 @@ import {
   providedIn: 'root'
 })
 export class WorkflowService {
-  private baseUrl = 'http://localhost:8080/api/v1';
+  private baseUrl = runtimeConfig.apiV1BaseUrl;
 
   constructor(private http: HttpClient) {}
 
