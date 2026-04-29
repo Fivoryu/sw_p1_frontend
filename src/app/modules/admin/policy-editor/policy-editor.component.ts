@@ -19,6 +19,7 @@ import {
   FormFieldDefinition,
   Policy
 } from '../../../shared/models/workflow.model';
+import { runtimeConfig } from '../../../shared/config/runtime-config';
 
 type CollaborationMode = 'PRIVATE' | 'READ_ONLY' | 'EDIT_SHARED';
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -1554,7 +1555,7 @@ ${edgeItems}
       return;
     }
 
-    const endpoint = `ws://localhost:8080/api/ws/policies/${policyId}?token=${encodeURIComponent(token)}`;
+    const endpoint = `${runtimeConfig.wsBaseUrl}/policies/${policyId}?token=${encodeURIComponent(token)}`;
     this.collaborationSocket = new WebSocket(endpoint);
 
     this.collaborationSocket.onopen = () => {

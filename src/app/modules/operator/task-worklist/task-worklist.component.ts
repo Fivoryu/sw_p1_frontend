@@ -3,6 +3,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../../services/auth.service';
+import { runtimeConfig } from '../../../shared/config/runtime-config';
 import { OperatorTask } from '../../../shared/models/workflow.model';
 import { WorkflowService } from '../../../shared/services/workflow.service';
 
@@ -243,7 +244,7 @@ export class TaskWorklistComponent implements OnInit, OnDestroy {
   private connectRealtime(): void {
     const roles = this.authService.currentUserValue?.roles ?? [];
     roles.forEach(role => {
-      const socket = new WebSocket(`ws://localhost:8080/api/ws/operator/roles/${role}`);
+      const socket = new WebSocket(`${runtimeConfig.wsBaseUrl}/operator/roles/${role}`);
       socket.onmessage = () => this.refresh();
       this.sockets.push(socket);
     });

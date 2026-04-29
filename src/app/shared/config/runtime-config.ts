@@ -12,11 +12,22 @@ function normalizeBaseUrl(value: string | undefined, fallback: string): string {
   return normalized.replace(/\/+$/, '');
 }
 
-const apiBaseUrl = normalizeBaseUrl(window.__APP_CONFIG__?.apiBaseUrl, 'http://localhost:8080/api');
-const aiServiceBaseUrl = normalizeBaseUrl(window.__APP_CONFIG__?.aiServiceBaseUrl, 'http://localhost:8090');
+function toWebSocketBaseUrl(httpUrl: string): string {
+  if (httpUrl.startsWith('https://')) {
+    return `wss://${httpUrl.slice('https://'.length)}`;
+  }
+  if (httpUrl.startsWith('http://')) {
+    return `ws://${httpUrl.slice('http://'.length)}`;
+  }
+  return httpUrl;
+}
+
+const apiBaseUrl = normalizeBaseUrl(window.__APP_CONFIG__?.apiBaseUrl, 'https://sw1-p1-backend.onrender.com/api');
+const aiServiceBaseUrl = normalizeBaseUrl(window.__APP_CONFIG__?.aiServiceBaseUrl, 'https://sw1-p1-fastapi.onrender.com');
 
 export const runtimeConfig = {
   apiBaseUrl,
   apiV1BaseUrl: `${apiBaseUrl}/v1`,
-  aiServiceBaseUrl
+  aiServiceBaseUrl,
+  wsBaseUrl: `${toWebSocketBaseUrl(apiBaseUrl)}/ws`
 };

@@ -1,4 +1,4 @@
 window.__APP_CONFIG__ = window.__APP_CONFIG__ || {
-  apiBaseUrl: 'http://localhost:8080/api',
-  aiServiceBaseUrl: 'http://localhost:8090'
+  apiBaseUrl: 'https://sw1-p1-backend.onrender.com/api',
+  aiServiceBaseUrl: 'https://sw1-p1-fastapi.onrender.com'
 };
