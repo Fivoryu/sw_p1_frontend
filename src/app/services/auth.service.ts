@@ -38,6 +38,8 @@ export class AuthService {
   public currentUser: Observable<AuthUser | null>;
   private tokenKey = 'auth_token';
   private userKey = 'user';
+  private storageFallbackTokenKey = 'auth_token_fallback';
+  private storageFallbackUserKey = 'user_fallback';
 
   constructor(private http: HttpClient) {
     this.currentUserSubject = new BehaviorSubject<AuthUser | null>(this.getUserFromStorage());
@@ -52,8 +54,15 @@ export class AuthService {
     return this.http.post<LoginResponse>(`${this.apiUrl}/login`, credentials)
       .pipe(
         tap(response => {
-          localStorage.setItem(this.tokenKey, response.token);
-          localStorage.setItem(this.userKey, JSON.stringify(response.user));
+          // Some browsers/extension combos can throw on localStorage in private mode.
+          // Fall back to sessionStorage so login doesn't falsely look "failed".
+          try {
+            localStorage.setItem(this.tokenKey, response.token);
+            localStorage.setItem(this.userKey, JSON.stringify(response.user));
+          } catch {
+            sessionStorage.setItem(this.storageFallbackTokenKey, response.token);
+            sessionStorage.setItem(this.storageFallbackUserKey, JSON.stringify(response.user));
+          }
           this.currentUserSubject.next(response.user);
         })
       );
@@ -74,13 +83,23 @@ export class AuthService {
   }
 
   logout(): void {
-    localStorage.removeItem(this.tokenKey);
-    localStorage.removeItem(this.userKey);
+    try {
+      localStorage.removeItem(this.tokenKey);
+      localStorage.removeItem(this.userKey);
+    } catch {
+      // ignore
+    }
+    sessionStorage.removeItem(this.storageFallbackTokenKey);
+    sessionStorage.removeItem(this.storageFallbackUserKey);
     this.currentUserSubject.next(null);
   }
 
   getToken(): string | null {
-    return localStorage.getItem(this.tokenKey);
+    try {
+      return localStorage.getItem(this.tokenKey);
+    } catch {
+      return sessionStorage.getItem(this.storageFallbackTokenKey);
+    }
   }
 
   isAuthenticated(): boolean {
@@ -123,8 +142,13 @@ export class AuthService {
       const userJson = localStorage.getItem(this.userKey);
       return userJson ? JSON.parse(userJson) : null;
     } catch (error) {
-      console.error('Error parsing user from storage:', error);
-      return null;
+      try {
+        const userJson = sessionStorage.getItem(this.storageFallbackUserKey);
+        return userJson ? JSON.parse(userJson) : null;
+      } catch {
+        console.error('Error parsing user from storage:', error);
+        return null;
+      }
     }
   }
 }

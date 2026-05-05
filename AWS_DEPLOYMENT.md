@@ -2,6 +2,8 @@
 
 Este frontend Angular queda preparado para publicarse como sitio estatico en Amazon S3 y servirlo por CloudFront.
 
+Tambien hay un `Dockerfile` (build con Node 20 + nginx) para **desarrollo local** con `docker compose` en el monorepo o para un despliegue alternativo en contenedor si lo necesitas.
+
 ## Recursos AWS necesarios
 
 - Un bucket S3 para hosting de artefactos

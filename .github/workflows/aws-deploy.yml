@@ -33,13 +33,11 @@ jobs:
         run: npm ci
 
       - name: Generate AWS runtime config
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          AI_SERVICE_BASE_URL: ${{ secrets.AI_SERVICE_BASE_URL }}
         run: |
-          cat <<'EOF' > src/assets/env.js
-          window.__APP_CONFIG__ = {
-            apiBaseUrl: '${{ secrets.API_BASE_URL }}',
-            aiServiceBaseUrl: '${{ secrets.AI_SERVICE_BASE_URL }}'
-          };
-          EOF
+          node -e "const fs=require('fs'); const cfg={ apiBaseUrl: process.env.API_BASE_URL||'', aiServiceBaseUrl: process.env.AI_SERVICE_BASE_URL||'' }; fs.mkdirSync('src/assets',{recursive:true}); fs.writeFileSync('src/assets/env.js', 'window.__APP_CONFIG__ = '+JSON.stringify(cfg)+';\\n');"
 
       - name: Build application
         run: npm run build

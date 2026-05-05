@@ -13,7 +13,10 @@ export type BusinessPolicy = Policy;
 export interface CreatePolicyRequest {
   name: string;
   description: string;
-  bpmnXml: string;
+  bpmnXml?: string;
+  umlActivityJson?: Record<string, unknown>;
+  umlVersion?: string;
+  diagramNotation?: string;
   departments: DepartmentDefinition[];
   forms: FormDefinition[];
   collaborationEnabled?: boolean;
@@ -23,13 +26,15 @@ export interface CreatePolicyRequest {
 export interface DiagramGenerationRequest {
   prompt: string;
   business_context?: string;
-  output_format: 'bpmn';
+  output_format: 'bpmn' | 'uml_activity';
 }
 
 export interface GeneratedDiagramNode {
   id: string;
-  type: 'START' | 'END' | 'TASK' | 'DECISION' | 'PARALLEL' | string;
+  type: 'START' | 'END' | 'TASK' | 'DECISION' | 'PARALLEL' | 'INITIAL' | 'ACTION' | 'MERGE' | 'FORK' | 'JOIN' | 'ACTIVITY_FINAL' | 'OBJECT_NODE' | 'SEND_SIGNAL' | 'ACCEPT_SIGNAL' | 'SIGNAL_SEND' | 'SIGNAL_RECEIVE' | 'NOTE' | string;
   label: string;
+  partition?: string;
+  umlElement?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -37,6 +42,8 @@ export interface GeneratedDiagramFlow {
   id: string;
   source: string;
   target: string;
+  type?: string;
+  guard?: string;
 }
 
 export interface DiagramGenerationResponse {
@@ -46,6 +53,8 @@ export interface DiagramGenerationResponse {
   generated_structure: {
     nodes: GeneratedDiagramNode[];
     flows: GeneratedDiagramFlow[];
+    edges?: GeneratedDiagramFlow[];
+    partitions?: Array<Record<string, unknown>>;
     metadata?: Record<string, unknown>;
   };
   bpmn_xml: string | null;
@@ -91,6 +100,9 @@ export class PolicyService {
       name: policy.name,
       description: policy.description,
       bpmnXml: policy.bpmnXml,
+      umlActivityJson: policy.umlActivityJson,
+      umlVersion: policy.umlVersion ?? '2.5',
+      diagramNotation: policy.diagramNotation ?? 'BPMN_EXECUTABLE_WITH_UML_ACTIVITY_VIEW',
       departments: policy.departments ?? [],
       forms: policy.forms ?? [],
       collaborationEnabled: policy.collaborationEnabled ?? false,

@@ -53,9 +53,41 @@ interface CollaborationMessage {
   name: string;
   description: string;
   bpmnXml: string;
+  umlActivityJson?: UmlActivityStructure;
   forms: FormDefinition[];
   taskBindings: TaskBinding[];
   timestamp: number;
+}
+
+interface UmlActivityPartition {
+  id: string;
+  name: string;
+  umlElement?: string;
+}
+
+interface UmlActivityNode {
+  id: string;
+  type: 'INITIAL' | 'ACTION' | 'DECISION' | 'MERGE' | 'FORK' | 'JOIN' | 'ACTIVITY_FINAL' | 'OBJECT_NODE' | 'SEND_SIGNAL' | 'ACCEPT_SIGNAL' | 'NOTE' | string;
+  label: string;
+  partition: string;
+  umlElement?: string;
+  x?: number;
+  y?: number;
+}
+
+interface UmlActivityEdge {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
+  guard?: string;
+}
+
+interface UmlActivityStructure {
+  nodes: UmlActivityNode[];
+  edges: UmlActivityEdge[];
+  partitions: UmlActivityPartition[];
+  metadata: Record<string, unknown>;
 }
 
 @Component({
@@ -265,19 +297,208 @@ interface CollaborationMessage {
             </div>
 
             <div class="editor-actions">
+              <div>
+                <h3>Diagrama UML 2.5 de actividad</h3>
+                <p class="section-help">Edita el diagrama de negocio directamente: calles, acciones, decisiones, objetos, señales y flujos UML.</p>
+              </div>
               <button class="secondary" type="button" [disabled]="!canEditCurrentPolicy" (click)="refreshTaskBindings()">Sincronizar tareas</button>
-              <button class="secondary" type="button" (click)="exportXml()">Exportar XML</button>
             </div>
 
-            <div class="canvas-wrapper" [class.read-only]="!canEditCurrentPolicy">
-              <div #canvas class="canvas"></div>
-              <div class="canvas-overlay" *ngIf="!canEditCurrentPolicy">
-                <strong>Solo lectura</strong>
-                <span>El dueño de esta política te permite verla en tiempo real, pero no editarla.</span>
+            <div class="uml-toolbar" [class.read-only]="!canEditCurrentPolicy">
+              <div class="uml-toolbar-group">
+                <label class="stacked-field">
+                  <span>Nueva calle</span>
+                  <input
+                    [(ngModel)]="newUmlPartitionName"
+                    [disabled]="!canEditCurrentPolicy"
+                    placeholder="Ej. Cliente, Ventas, Sistema"
+                  />
+                </label>
+                <button class="secondary" type="button" [disabled]="!canEditCurrentPolicy" (click)="addUmlPartition()">Agregar calle</button>
+              </div>
+
+              <div class="uml-toolbar-group node-group">
+                <label class="stacked-field">
+                  <span>Tipo UML</span>
+                  <select [(ngModel)]="newUmlNodeType" [disabled]="!canEditCurrentPolicy">
+                    <option *ngFor="let option of umlNodeTypeOptions" [value]="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+                <label class="stacked-field wide-field">
+                  <span>Nombre del nodo</span>
+                  <input
+                    [(ngModel)]="newUmlNodeLabel"
+                    [disabled]="!canEditCurrentPolicy"
+                    placeholder="Ej. Validar documentos"
+                  />
+                </label>
+                <label class="stacked-field">
+                  <span>Calle</span>
+                  <select [(ngModel)]="newUmlNodePartition" [disabled]="!canEditCurrentPolicy">
+                    <option *ngFor="let partition of umlActivityJson.partitions" [value]="partition.id">{{ partition.name }}</option>
+                  </select>
+                </label>
+                <button class="primary" type="button" [disabled]="!canEditCurrentPolicy" (click)="addUmlNode()">Agregar nodo</button>
               </div>
             </div>
 
-            <textarea class="xml-preview" [ngModel]="xmlPreview" rows="8" readonly></textarea>
+            <div class="bpmn-internal-canvas" aria-hidden="true">
+              <div #canvas class="canvas"></div>
+            </div>
+
+            <div class="uml-workbench">
+              <aside class="uml-palette" aria-label="Herramientas UML">
+                <button
+                  *ngFor="let option of umlNodeTypeOptions"
+                  type="button"
+                  [class.active]="newUmlNodeType === option.value"
+                  [disabled]="!canEditCurrentPolicy"
+                  (click)="selectUmlTool(option.value)"
+                  [title]="option.label"
+                >
+                  <span [ngClass]="toolIconClass(option.value)"></span>
+                  <small>{{ option.short }}</small>
+                </button>
+              </aside>
+
+              <div
+                class="uml-canvas-shell"
+                [class.panning]="umlPanState"
+                (mousedown)="beginUmlPan($event)"
+                (mousemove)="dragUmlNode($event)"
+                (mouseup)="endUmlNodeDrag()"
+                (mouseleave)="endUmlNodeDrag()"
+                (wheel)="zoomUmlCanvas($event)"
+              >
+                <div class="uml-canvas-toolbar">
+                  <strong>Diagrama UML {{ umlActivityJson.metadata['umlVersion'] }} de actividad</strong>
+                  <span>{{ umlActivityJson.partitions.length }} calles · {{ umlActivityJson.nodes.length }} nodos · {{ umlActivityJson.edges.length }} flujos</span>
+                </div>
+                <div
+                  class="uml-canvas"
+                  [style.width.px]="umlCanvasWidth"
+                  [style.height.px]="umlCanvasHeight"
+                  [style.zoom]="umlZoom"
+                  (dblclick)="addUmlNodeAt($event)"
+                >
+                  <div
+                    class="uml-horizontal-lane"
+                    *ngFor="let partition of umlActivityJson.partitions; let i = index"
+                    [style.top.px]="i * umlLaneHeight"
+                    [style.height.px]="umlLaneHeight"
+                  >
+                    <input
+                      [ngModel]="partition.name"
+                      [disabled]="!canEditCurrentPolicy"
+                      (ngModelChange)="renameUmlPartition(partition.id, $event)"
+                      (mousedown)="$event.stopPropagation()"
+                    />
+                  </div>
+
+                  <svg class="uml-edge-layer" [attr.viewBox]="'0 0 ' + umlCanvasWidth + ' ' + umlCanvasHeight">
+                    <defs>
+                      <marker id="umlArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                        <path d="M0,0 L0,6 L9,3 z" fill="#111827"></path>
+                      </marker>
+                    </defs>
+                    <g *ngFor="let edge of umlActivityJson.edges">
+                      <line
+                        [attr.x1]="edgeStart(edge).x"
+                        [attr.y1]="edgeStart(edge).y"
+                        [attr.x2]="edgeEnd(edge).x"
+                        [attr.y2]="edgeEnd(edge).y"
+                        [attr.class]="edgeSvgClass(edge)"
+                        marker-end="url(#umlArrow)"
+                      ></line>
+                      <text
+                        *ngIf="edge.guard"
+                        class="uml-edge-label"
+                        [attr.x]="edgeLabelPoint(edge).x"
+                        [attr.y]="edgeLabelPoint(edge).y"
+                      >
+                        {{ edge.guard }}
+                      </text>
+                    </g>
+                  </svg>
+
+                  <div
+                    *ngFor="let node of umlActivityJson.nodes"
+                    class="uml-canvas-node"
+                    [class.selected]="node.id === selectedUmlNodeId"
+                    [ngClass]="umlNodeClass(node)"
+                    [ngStyle]="umlNodeStyle(node)"
+                    (mousedown)="beginUmlNodeDrag($event, node)"
+                    (click)="selectUmlNode(node.id); $event.stopPropagation()"
+                    (dblclick)="$event.stopPropagation()"
+                    [title]="nodeTypeLabel(node)"
+                  >
+                    <input
+                      *ngIf="node.type !== 'INITIAL' && node.type !== 'ACTIVITY_FINAL' && node.type !== 'FORK' && node.type !== 'JOIN'"
+                      [ngModel]="node.label"
+                      [disabled]="!canEditCurrentPolicy"
+                      (ngModelChange)="updateUmlNode(node.id, 'label', $event)"
+                      (mousedown)="$event.stopPropagation()"
+                      (click)="$event.stopPropagation()"
+                    />
+                    <span *ngIf="node.type === 'FORK' || node.type === 'JOIN'"></span>
+                  </div>
+                </div>
+              </div>
+
+              <aside class="uml-inspector">
+                <h4>Inspector</h4>
+                <ng-container *ngIf="selectedUmlNode as node; else noNodeSelected">
+                  <label class="stacked-field">
+                    <span>Nombre</span>
+                    <input
+                      [ngModel]="node.label"
+                      [disabled]="!canEditCurrentPolicy || node.type === 'INITIAL'"
+                      (ngModelChange)="updateUmlNode(node.id, 'label', $event)"
+                    />
+                  </label>
+                  <label class="stacked-field">
+                    <span>Tipo</span>
+                    <select
+                      [ngModel]="node.type"
+                      [disabled]="!canEditCurrentPolicy || node.type === 'INITIAL'"
+                      (ngModelChange)="updateUmlNode(node.id, 'type', $event)"
+                    >
+                      <option *ngFor="let option of editableUmlNodeTypeOptions" [value]="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label class="stacked-field">
+                    <span>Calle</span>
+                    <select
+                      [ngModel]="node.partition"
+                      [disabled]="!canEditCurrentPolicy"
+                      (ngModelChange)="updateUmlNode(node.id, 'partition', $event)"
+                    >
+                      <option *ngFor="let partition of umlActivityJson.partitions" [value]="partition.id">{{ partition.name }}</option>
+                    </select>
+                  </label>
+                  <button class="danger" type="button" [disabled]="!canEditCurrentPolicy || node.type === 'INITIAL'" (click)="removeUmlNode(node.id)">
+                    Quitar nodo
+                  </button>
+                </ng-container>
+                <ng-template #noNodeSelected>
+                  <p class="section-help">Selecciona un nodo del canvas para editarlo. Arrastra dentro de las calles para moverlo.</p>
+                </ng-template>
+
+                <div class="uml-guard-editor" *ngIf="decisionEdges().length">
+                  <h4>Guardas</h4>
+                  <label class="stacked-field" *ngFor="let edge of decisionEdges()">
+                    <span>{{ nodeLabelById(edge.source) }} -> {{ nodeLabelById(edge.target) }}</span>
+                    <input
+                      [ngModel]="edge.guard || ''"
+                      [disabled]="!canEditCurrentPolicy"
+                      (ngModelChange)="updateUmlEdgeGuard(edge.id, $event)"
+                      placeholder="[condición]"
+                    />
+                  </label>
+                </div>
+              </aside>
+            </div>
+
             <p class="feedback" *ngIf="feedback">{{ feedback }}</p>
           </section>
 
@@ -435,7 +656,7 @@ interface CollaborationMessage {
               <select
                 [(ngModel)]="selectedTaskBinding.departmentRole"
                 [disabled]="!canEditCurrentPolicy"
-                (ngModelChange)="markDirty()"
+                (ngModelChange)="updateSelectedTaskDepartment($event)"
               >
                 <option value="">Selecciona un departamento</option>
                 <option *ngFor="let department of departments" [value]="department.role">{{ department.name }}</option>
@@ -502,11 +723,99 @@ interface CollaborationMessage {
     .list-item span { color: #52607a; font-size: 0.86rem; }
     .policy-meta, .field-grid, .form-meta-card { display: grid; gap: 0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .editor-panel { gap: 1rem; }
-    .canvas-wrapper { position: relative; min-height: 34rem; border-radius: 24px; overflow: hidden; border: 1px solid #dbe4f0; background: radial-gradient(circle at top left, #f8fbff, #eef5ff 55%, #ffffff); }
-    .canvas { height: 34rem; width: 100%; }
-    .canvas-overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 0.35rem; background: rgba(248, 250, 252, 0.82); color: #0f172a; text-align: center; padding: 1rem; backdrop-filter: blur(2px); }
-    .canvas-wrapper.read-only { border-style: dashed; }
-    .xml-preview { width: 100%; border-radius: 18px; border: 1px solid #dbe4f0; padding: 1rem; font-family: Consolas, monospace; resize: vertical; color: #475569; background: #f8fafc; }
+    .bpmn-internal-canvas { position: fixed; left: -10000px; top: -10000px; width: 1200px; height: 800px; overflow: hidden; pointer-events: none; opacity: 0; }
+    .uml-toolbar { border: 1px solid #dbe4f0; border-radius: 16px; background: #f8fafc; padding: 0.9rem; display: grid; gap: 0.85rem; }
+    .uml-toolbar.read-only { opacity: 0.7; }
+    .uml-toolbar-group { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
+    .uml-toolbar-group .stacked-field { min-width: 12rem; }
+    .node-group { display: grid; grid-template-columns: minmax(10rem, 0.8fr) minmax(16rem, 1.4fr) minmax(12rem, 1fr) auto; align-items: end; }
+    .wide-field { min-width: 16rem; }
+    .uml-preview { border: 1px solid #dbe4f0; border-radius: 20px; background: #fff; overflow: auto; min-height: 28rem; }
+    .uml-title-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.9rem 1rem; border-bottom: 1px solid #dbe4f0; color: #0f172a; }
+    .uml-legend { display: flex; flex-wrap: wrap; gap: 0.7rem; padding: 0.8rem 1rem; border-bottom: 1px solid #dbe4f0; background: #f8fafc; color: #334155; font-size: 0.78rem; font-weight: 800; }
+    .uml-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .uml-legend i { width: 1rem; height: 1rem; display: inline-block; border: 2px solid #0f172a; background: #fff; }
+    .legend-dot { border-radius: 999px; background: #0f172a !important; }
+    .legend-action { border-color: #0369a1; border-radius: 5px; background: #e0f2fe !important; }
+    .legend-object { border-color: #7c3aed; background: #f5f3ff !important; }
+    .legend-diamond { transform: rotate(45deg); border-color: #dc2626; background: #fee2e2 !important; }
+    .legend-bar { width: 0.35rem !important; height: 1.2rem !important; background: #0f172a !important; }
+    .uml-lane { display: grid; grid-template-columns: 10rem minmax(42rem, 1fr); min-height: 8rem; border-bottom: 1px solid #dbe4f0; }
+    .uml-lane:last-child { border-bottom: 0; }
+    .uml-lane-label { display: flex; align-items: center; justify-content: center; padding: 1rem; background: #0f766e; color: #fff; font-weight: 900; writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; }
+    .uml-lane-body { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; min-width: max-content; }
+    .uml-node { display: grid; place-items: center; min-width: 7.5rem; max-width: 11rem; min-height: 3.25rem; padding: 0.65rem 0.8rem; border: 2px solid #0f172a; background: #ffffff; color: #0f172a; text-align: center; font-weight: 800; font-size: 0.78rem; line-height: 1.25; }
+    .uml-node span { overflow-wrap: anywhere; }
+    .uml-action { border-radius: 14px; background: #e0f2fe; border-color: #0369a1; }
+    .uml-decision, .uml-merge { width: 5.5rem; height: 5.5rem; min-width: 5.5rem; min-height: 5.5rem; transform: rotate(45deg); border-radius: 4px; background: #fee2e2; border-color: #dc2626; }
+    .uml-decision span, .uml-merge span { transform: rotate(-45deg); font-size: 0.72rem; }
+    .uml-initial { width: 2.2rem; height: 2.2rem; min-width: 2.2rem; min-height: 2.2rem; border-radius: 999px; background: #0f172a; padding: 0; }
+    .uml-initial span { display: none; }
+    .uml-final { width: 2.9rem; height: 2.9rem; min-width: 2.9rem; min-height: 2.9rem; border-radius: 999px; background: radial-gradient(circle, #0f172a 0 34%, #fff 36% 55%, #0f172a 57% 100%); padding: 0; }
+    .uml-final span { display: none; }
+    .uml-object { border-radius: 4px; background: #f5f3ff; border-color: #7c3aed; }
+    .uml-fork, .uml-join { width: 1rem; min-width: 1rem; height: 5rem; min-height: 5rem; padding: 0; background: #0f172a; border-color: #0f172a; }
+    .uml-fork span, .uml-join span { display: none; }
+    .uml-signal-send { clip-path: polygon(0 0, 78% 0, 100% 50%, 78% 100%, 0 100%); border-color: #166534; background: #dcfce7; border-radius: 0; }
+    .uml-signal-receive { clip-path: polygon(0 0, 100% 0, 78% 50%, 100% 100%, 0 100%); border-color: #92400e; background: #fef3c7; border-radius: 0; }
+    .uml-note { position: relative; border-radius: 2px; border-color: #64748b; background: linear-gradient(135deg, #ffffff 0 78%, #cbd5e1 79% 100%); font-style: italic; }
+    .uml-connector { color: #475569; font-weight: 900; white-space: nowrap; }
+    .uml-connector::before { content: '-> '; }
+    .uml-flow-list { display: grid; gap: 0.45rem; padding: 1rem; border-top: 1px solid #dbe4f0; background: #fbfdff; color: #334155; }
+    .uml-flow-item { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; font-size: 0.84rem; }
+    .uml-flow-item.object-flow .flow-arrow, .uml-flow-item.annotation-flow .flow-arrow { border-bottom: 2px dotted #64748b; color: transparent; min-width: 1.8rem; }
+    .uml-flow-item em { color: #b45309; font-style: normal; font-weight: 800; }
+    .uml-empty { color: #64748b; font-weight: 700; }
+    .uml-edit-grid { display: grid; grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.3fr) minmax(260px, 1fr); gap: 0.85rem; }
+    .uml-edit-card { border: 1px solid #dbe4f0; border-radius: 16px; background: #fff; padding: 0.85rem; display: grid; gap: 0.65rem; align-content: start; }
+    .compact-header { align-items: center; margin-bottom: 0.15rem; }
+    .compact-header h4 { margin: 0; color: #0f172a; }
+    .uml-edit-row, .uml-edge-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+    .uml-node-editor { display: grid; grid-template-columns: minmax(9rem, 1.2fr) minmax(9rem, 0.9fr) minmax(9rem, 0.9fr) auto; gap: 0.5rem; align-items: center; }
+    .uml-edge-editor { grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 0.8fr); }
+    .uml-edge-editor span { color: #334155; font-size: 0.82rem; font-weight: 700; overflow-wrap: anywhere; }
+    .danger-text { color: #dc2626; }
+    .uml-workbench { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; align-items: stretch; min-height: 38rem; }
+    .uml-palette { border: 1px solid #dbe4f0; border-radius: 16px; background: #f8fafc; padding: 0.55rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(4.25rem, 1fr)); gap: 0.45rem; align-content: start; }
+    .uml-palette button { min-height: 3.8rem; border: 1px solid #cbd5e1; background: #fff; border-radius: 10px; display: grid; place-items: center; gap: 0.15rem; color: #0f172a; font-weight: 900; cursor: pointer; overflow: hidden; }
+    .uml-palette button.active { border-color: #0f766e; box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16); background: #ecfdf5; }
+    .uml-palette button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .tool-icon { display: block; width: 1.25rem !important; height: 1.25rem !important; min-width: 0 !important; min-height: 0 !important; max-width: 1.7rem !important; max-height: 1.8rem !important; padding: 0 !important; border: 2px solid #111827; background: #fff; box-sizing: border-box; }
+    .tool-icon.uml-initial { border-radius: 999px; background: #111827; }
+    .tool-icon.uml-final { border-radius: 999px; background: radial-gradient(circle, #111827 0 35%, #fff 37% 57%, #111827 59% 100%); }
+    .tool-icon.uml-action { width: 1.7rem; border-radius: 7px; border-color: #2563eb; background: #dbeafe; }
+    .tool-icon.uml-decision, .tool-icon.uml-merge { width: 1.35rem !important; height: 1.35rem !important; transform: rotate(45deg); border-color: #dc2626; background: #fee2e2; }
+    .tool-icon.uml-fork, .tool-icon.uml-join { width: 0.35rem !important; height: 1.8rem !important; background: #111827; }
+    .tool-icon.uml-object { border-color: #eab308; background: #fef3c7; }
+    .tool-icon.uml-note { border-color: #64748b; background: linear-gradient(135deg, #fff 0 72%, #cbd5e1 73% 100%); }
+    .uml-canvas-shell { border: 1px solid #1f2a44; background: #fff; overflow: auto; min-height: 34rem; max-height: 48rem; position: relative; max-width: 100%; cursor: grab; scrollbar-width: thin; }
+    .uml-canvas-shell.panning { cursor: grabbing; }
+    .uml-canvas-toolbar { position: sticky; top: 0; z-index: 6; min-height: 2.65rem; padding: 0.45rem 0.85rem; border-bottom: 1px solid #1f2a44; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; color: #1f2937; flex-wrap: wrap; }
+    .uml-canvas-toolbar strong { line-height: 1.2; }
+    .uml-canvas { position: relative; background: #fff; background-image: linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px); background-size: 24px 24px; }
+    .uml-horizontal-lane { position: absolute; left: 0; right: 0; border-bottom: 2px solid #1f2a44; }
+    .uml-horizontal-lane:first-child { border-top: 2px solid #1f2a44; }
+    .uml-horizontal-lane input { position: sticky; left: 0; z-index: 5; width: 8.75rem; height: 100%; border: 0; border-right: 2px solid #1f2a44; background: #0f766e; color: #fff; text-align: center; font-weight: 900; border-radius: 0; padding: 0 0.7rem; box-sizing: border-box; writing-mode: vertical-rl; transform: rotate(180deg); }
+    .uml-edge-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: visible; }
+    .uml-svg-edge { stroke: #111827; stroke-width: 2; fill: none; }
+    .uml-svg-edge.dashed { stroke-dasharray: 7 5; }
+    .uml-edge-label { fill: #4b5563; font-size: 13px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+    .uml-canvas-node { position: absolute; z-index: 3; display: grid; place-items: center; cursor: move; user-select: none; overflow: visible; color: #fff; border: 2px solid #111827; background: #3b82c4; box-shadow: 0 2px 0 rgba(15, 23, 42, 0.08); }
+    .uml-canvas-node.selected { outline: 3px solid rgba(14, 165, 233, 0.45); outline-offset: 4px; }
+    .uml-canvas-node input { width: 100%; height: 100%; border: 0; background: transparent; color: inherit; text-align: center; font-weight: 800; padding: 0.35rem 0.55rem; outline: none; }
+    .uml-canvas-node.uml-action { border-radius: 16px; border-color: #2563eb; background: #3b82c4; }
+    .uml-canvas-node.uml-object { border-radius: 2px; border-color: #eab308; background: #fbbf24; color: #fff; }
+    .uml-canvas-node.uml-note { border-radius: 2px; border-color: #94a3b8; color: #334155; background: linear-gradient(135deg, #fff 0 78%, #cbd5e1 79% 100%); }
+    .uml-canvas-node.uml-decision, .uml-canvas-node.uml-merge { transform: rotate(45deg); border-radius: 2px; border-color: #ef4444; background: #fef2f2; color: #111827; }
+    .uml-canvas-node.uml-decision input, .uml-canvas-node.uml-merge input { transform: rotate(-45deg); width: 92px; height: 56px; font-size: 0.72rem; }
+    .uml-canvas-node.uml-initial { border-radius: 999px; background: #111827; border-color: #111827; }
+    .uml-canvas-node.uml-final { border-radius: 999px; background: radial-gradient(circle, #111827 0 34%, #fff 36% 55%, #111827 57% 100%); border-color: #111827; }
+    .uml-canvas-node.uml-fork, .uml-canvas-node.uml-join { background: #1f2a44; border-color: #1f2a44; border-radius: 0; }
+    .uml-canvas-node.uml-signal-send { clip-path: polygon(0 0, 78% 0, 100% 50%, 78% 100%, 0 100%); border-color: #166534; background: #16a34a; }
+    .uml-canvas-node.uml-signal-receive { clip-path: polygon(0 0, 100% 0, 78% 50%, 100% 100%, 0 100%); border-color: #92400e; background: #f59e0b; }
+    .uml-inspector { border: 1px solid #dbe4f0; border-radius: 16px; background: #f8fafc; padding: 0.9rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.75rem; align-content: start; }
+    .uml-inspector h4 { margin: 0; color: #0f172a; }
+    .uml-guard-editor { display: grid; gap: 0.6rem; border-top: 1px solid #dbe4f0; padding-top: 0.75rem; grid-column: 1 / -1; }
     .feedback { color: #0369a1; font-weight: 600; }
     .forms-panel { gap: 1rem; }
     .ai-panel { background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%); }
@@ -561,7 +870,8 @@ interface CollaborationMessage {
       .ai-actions { justify-content: stretch; }
       .ai-actions button { width: 100%; }
       .policy-meta, .field-grid, .form-meta-card, .compact-grid { grid-template-columns: 1fr; }
-      .canvas { height: 24rem; }
+      .node-group, .uml-edit-grid, .uml-node-editor, .uml-workbench { grid-template-columns: 1fr; }
+      .uml-palette { grid-template-columns: repeat(5, minmax(0, 1fr)); }
     }
   `]
 })
@@ -578,6 +888,52 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
   name = '';
   description = '';
   xmlPreview = '';
+  umlActivityJson: UmlActivityStructure = {
+    nodes: [],
+    edges: [],
+    partitions: [],
+    metadata: {
+      umlVersion: '2.5',
+      diagramType: 'ActivityDiagram',
+      partitionElement: 'ActivityPartition'
+    }
+  };
+  newUmlPartitionName = 'Cliente';
+  newUmlNodeLabel = 'Registrar solicitud';
+  newUmlNodeType: UmlActivityNode['type'] = 'ACTION';
+  newUmlNodePartition = 'partition_negocio';
+  selectedUmlNodeId: string | null = null;
+  readonly umlLaneHeight = 150;
+  readonly umlLaneLabelWidth = 140;
+  readonly umlCanvasMinWidth = 1280;
+  umlZoom = 1;
+  private umlDragState: { nodeId: string; offsetX: number; offsetY: number } | null = null;
+  umlPanState: { startX: number; startY: number; scrollLeft: number; scrollTop: number } | null = null;
+  private readonly locallyEditablePolicyIds = new Set<string>();
+  readonly umlNodeTypeOptions = [
+    { value: 'ACTION', label: 'Acción', short: 'Act' },
+    { value: 'DECISION', label: 'Decisión con [si]/[no]', short: 'Dec' },
+    { value: 'MERGE', label: 'Merge', short: 'Mrg' },
+    { value: 'FORK', label: 'Fork', short: 'Fork' },
+    { value: 'JOIN', label: 'Join', short: 'Join' },
+    { value: 'OBJECT_NODE', label: 'Objeto / documento', short: 'Obj' },
+    { value: 'SEND_SIGNAL', label: 'Envío de señal', short: 'Send' },
+    { value: 'ACCEPT_SIGNAL', label: 'Recepción de señal', short: 'Recv' },
+    { value: 'NOTE', label: 'Nota', short: 'Note' },
+    { value: 'ACTIVITY_FINAL', label: 'Final adicional', short: 'Fin' }
+  ];
+  readonly editableUmlNodeTypeOptions = [
+    { value: 'ACTION', label: 'Acción' },
+    { value: 'DECISION', label: 'Decisión' },
+    { value: 'MERGE', label: 'Merge' },
+    { value: 'FORK', label: 'Fork' },
+    { value: 'JOIN', label: 'Join' },
+    { value: 'OBJECT_NODE', label: 'Objeto' },
+    { value: 'SEND_SIGNAL', label: 'Envío señal' },
+    { value: 'ACCEPT_SIGNAL', label: 'Recepción señal' },
+    { value: 'NOTE', label: 'Nota' },
+    { value: 'ACTIVITY_FINAL', label: 'Final' }
+  ];
   feedback = '';
   collaborationStatus = 'La colaboración se habilita cuando la política ya existe y el dueño decide compartirla.';
   ownerDisplayName = '';
@@ -642,19 +998,62 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     return this.forms.find(form => form.id === this.selectedFormId) ?? null;
   }
 
+  get selectedUmlNode(): UmlActivityNode | null {
+    return this.umlActivityJson.nodes.find(node => node.id === this.selectedUmlNodeId) ?? null;
+  }
+
+  get umlCanvasWidth(): number {
+    const maxRight = this.umlActivityJson.nodes.reduce((max, node) => {
+      const position = this.umlNodePosition(node);
+      const size = this.umlNodeSize(node);
+      return Math.max(max, position.x + size.width + 180);
+    }, 0);
+    return Math.max(this.umlCanvasMinWidth, maxRight);
+  }
+
+  get umlCanvasHeight(): number {
+    const laneHeight = Math.max(this.umlActivityJson.partitions.length, 1) * this.umlLaneHeight;
+    const maxBottom = this.umlActivityJson.nodes.reduce((max, node) => {
+      const position = this.umlNodePosition(node);
+      const size = this.umlNodeSize(node);
+      return Math.max(max, position.y + size.height + 60);
+    }, 0);
+    return Math.max(laneHeight, maxBottom, 420);
+  }
+
   get isOwner(): boolean {
     const userId = this.authService.currentUserValue?.id;
     return !this.selectedPolicy || !this.selectedPolicy.ownerUserId || this.selectedPolicy.ownerUserId === userId;
   }
 
   get canEditCurrentPolicy(): boolean {
+    // Permitir edición si:
+    // 1. No hay política seleccionada (nueva en borrador)
+    // 2. Ya está desbloqueada localmente por este usuario
+    // 3. Es el propietario
+    // 4. Tiene permisos de colaboración en modo edición
+    
     if (!this.selectedPolicy) {
+      return true;
+    }
+    if (this.selectedPolicy.id && this.locallyEditablePolicyIds.has(this.selectedPolicy.id)) {
       return true;
     }
     if (this.isOwner) {
       return true;
     }
-    return !!this.selectedPolicy.collaborationEnabled && this.selectedPolicy.collaborationMode === 'EDIT_SHARED';
+    
+    // Por defecto, permitir edición si está guardada localmente o en desarrollo
+    const hasCollaborationPermission = !!this.selectedPolicy.collaborationEnabled && 
+                                       this.selectedPolicy.collaborationMode === 'EDIT_SHARED';
+    
+    // Si no tiene permisos de colaboración, igualmente permitir en desarrollo local
+    if (!hasCollaborationPermission && typeof window !== 'undefined' && 
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return true;
+    }
+    
+    return hasCollaborationPermission;
   }
 
   get canManageCollaboration(): boolean {
@@ -749,6 +1148,124 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     return this.forms.reduce((acc, form) => acc + form.fields.length, 0);
   }
 
+  nodesForPartition(partitionId: string): UmlActivityNode[] {
+    return this.umlActivityJson.nodes.filter(node => node.partition === partitionId);
+  }
+
+  editableUmlNodes(): UmlActivityNode[] {
+    return this.umlActivityJson.nodes.filter(node => node.type !== 'INITIAL');
+  }
+
+  decisionEdges(): UmlActivityEdge[] {
+    const decisionIds = new Set(
+      this.umlActivityJson.nodes
+        .filter(node => node.type === 'DECISION')
+        .map(node => node.id)
+    );
+    return this.umlActivityJson.edges.filter(edge => decisionIds.has(edge.source));
+  }
+
+  umlNodeClass(node: UmlActivityNode): string {
+    switch (node.type) {
+      case 'INITIAL':
+        return 'uml-initial';
+      case 'ACTIVITY_FINAL':
+        return 'uml-final';
+      case 'DECISION':
+        return 'uml-decision';
+      case 'MERGE':
+        return 'uml-merge';
+      case 'FORK':
+        return 'uml-fork';
+      case 'JOIN':
+        return 'uml-join';
+      case 'OBJECT_NODE':
+        return 'uml-object';
+      case 'SEND_SIGNAL':
+      case 'SIGNAL_SEND':
+        return 'uml-signal-send';
+      case 'ACCEPT_SIGNAL':
+      case 'SIGNAL_RECEIVE':
+        return 'uml-signal-receive';
+      case 'NOTE':
+        return 'uml-note';
+      default:
+        return 'uml-action';
+    }
+  }
+
+  nodeTypeLabel(node: UmlActivityNode): string {
+    return `${node.umlElement || this.umlElementForNodeType(node.type)} · ${node.type}`;
+  }
+
+  nodeLabelById(nodeId: string): string {
+    const node = this.umlActivityJson.nodes.find(item => item.id === nodeId);
+    return node?.label || nodeId;
+  }
+
+  umlFlowClass(edge: UmlActivityEdge): string {
+    if (edge.type === 'ObjectFlow') {
+      return 'object-flow';
+    }
+    if (edge.type === 'Annotation') {
+      return 'annotation-flow';
+    }
+    return 'control-flow';
+  }
+
+  umlConnectorLabel(nodeId: string): string {
+    const edge = this.umlActivityJson.edges.find(item => item.source === nodeId);
+    return edge?.guard ?? '';
+  }
+
+  umlNodeStyle(node: UmlActivityNode): Record<string, string> {
+    const position = this.umlNodePosition(node);
+    const size = this.umlNodeSize(node);
+    return {
+      left: `${position.x}px`,
+      top: `${position.y}px`,
+      width: `${size.width}px`,
+      height: `${size.height}px`
+    };
+  }
+
+  edgeStart(edge: UmlActivityEdge): { x: number; y: number } {
+    const source = this.umlActivityJson.nodes.find(node => node.id === edge.source);
+    if (!source) {
+      return { x: 0, y: 0 };
+    }
+    const position = this.umlNodePosition(source);
+    const size = this.umlNodeSize(source);
+    return { x: position.x + size.width, y: position.y + size.height / 2 };
+  }
+
+  edgeEnd(edge: UmlActivityEdge): { x: number; y: number } {
+    const target = this.umlActivityJson.nodes.find(node => node.id === edge.target);
+    if (!target) {
+      return { x: 0, y: 0 };
+    }
+    const position = this.umlNodePosition(target);
+    const size = this.umlNodeSize(target);
+    return { x: position.x, y: position.y + size.height / 2 };
+  }
+
+  edgeLabelPoint(edge: UmlActivityEdge): { x: number; y: number } {
+    const start = this.edgeStart(edge);
+    const end = this.edgeEnd(edge);
+    return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 8 };
+  }
+
+  edgeSvgClass(edge: UmlActivityEdge): string {
+    if (edge.type === 'ObjectFlow' || edge.type === 'Annotation') {
+      return 'uml-svg-edge dashed';
+    }
+    return 'uml-svg-edge';
+  }
+
+  toolIconClass(type: string): string {
+    return `tool-icon ${this.umlNodeClass({ id: '', type, label: '', partition: '' })}`;
+  }
+
   get speechSupported(): boolean {
     const browserWindow = window as typeof window & {
       SpeechRecognition?: unknown;
@@ -791,6 +1308,8 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.loadDepartments();
     await this.importXml(this.blankDiagram);
     this.xmlPreview = this.blankDiagram;
+    this.umlActivityJson = this.createEmptyUmlActivity();
+    this.syncTasksFromUml();
   }
 
   ngOnDestroy(): void {
@@ -860,9 +1379,11 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
       : 'Administrador';
 
     const xml = policy.bpmnXml || this.blankDiagram;
-    await this.importXml(xml);
-    this.syncTasksFromXml(xml);
-    this.xmlPreview = xml;
+    this.umlActivityJson = this.normalizeUmlActivity(policy.umlActivityJson) ?? this.buildUmlActivityFromXml(xml);
+    this.syncTasksFromUml();
+    const technicalXml = this.createTechnicalBpmnXml();
+    await this.importXml(technicalXml);
+    this.xmlPreview = technicalXml;
     this.hasPendingChanges = false;
     this.saveStatus = 'saved';
     this.feedback = `Política ${policy.name} cargada.`;
@@ -939,7 +1460,7 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.policyService.generateDiagramFromPrompt({
       prompt: this.aiPrompt.trim(),
       business_context: this.aiBusinessContext.trim() || undefined,
-      output_format: 'bpmn'
+      output_format: 'uml_activity'
     }).subscribe({
       next: response => {
         void this.applyGeneratedDiagram(response);
@@ -999,16 +1520,290 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.aiWarnings = [];
   }
 
-  async exportXml(): Promise<void> {
-    const result = await this.modeler.saveXML({ format: true });
-    this.xmlPreview = this.enrichXmlWithTaskBindings(result.xml ?? '');
-    this.feedback = 'XML exportado con configuración de tareas.';
+  refreshTaskBindings(): void {
+    this.syncTasksFromUml();
+    this.xmlPreview = this.createTechnicalBpmnXml();
+    this.feedback = 'Tareas humanas sincronizadas desde el diagrama UML.';
+    this.markDirty();
   }
 
-  refreshTaskBindings(): void {
-    const currentXml = this.xmlPreview || this.blankDiagram;
-    this.syncTasksFromXml(currentXml);
-    this.feedback = 'Tareas humanas sincronizadas desde el diagrama.';
+  selectUmlTool(type: string): void {
+    this.newUmlNodeType = type;
+    this.newUmlNodeLabel = this.defaultLabelForUmlType(type);
+  }
+
+  selectUmlNode(nodeId: string): void {
+    this.selectedUmlNodeId = nodeId;
+  }
+
+  addUmlNodeAt(event: MouseEvent): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const x = (event.clientX - rect.left + target.scrollLeft) / this.umlZoom;
+    const y = (event.clientY - rect.top + target.scrollTop) / this.umlZoom;
+    const partitionIndex = Math.max(0, Math.min(this.umlActivityJson.partitions.length - 1, Math.floor(y / this.umlLaneHeight)));
+    this.newUmlNodePartition = this.umlActivityJson.partitions[partitionIndex]?.id ?? 'partition_negocio';
+    const previousIds = new Set(this.umlActivityJson.nodes.map(node => node.id));
+    this.addUmlNode();
+    const newNodes = this.umlActivityJson.nodes.filter(node => !previousIds.has(node.id));
+    newNodes.forEach((node, index) => {
+      if (node.type !== 'ACTIVITY_FINAL') {
+        const size = this.umlNodeSize(node);
+        this.setUmlNodePosition(node.id, x - size.width / 2, y - size.height / 2 + index * 86);
+      }
+    });
+    if (newNodes[0]) {
+      this.selectedUmlNodeId = newNodes[0].id;
+    }
+  }
+
+  beginUmlNodeDrag(event: MouseEvent, node: UmlActivityNode): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.selectedUmlNodeId = node.id;
+    const position = this.umlNodePosition(node);
+    this.umlDragState = {
+      nodeId: node.id,
+      offsetX: event.offsetX || event.clientX - position.x,
+      offsetY: event.offsetY || event.clientY - position.y
+    };
+  }
+
+  dragUmlNode(event: MouseEvent): void {
+    if (this.umlPanState) {
+      const shell = event.currentTarget as HTMLElement;
+      shell.scrollLeft = this.umlPanState.scrollLeft - (event.clientX - this.umlPanState.startX);
+      shell.scrollTop = this.umlPanState.scrollTop - (event.clientY - this.umlPanState.startY);
+      return;
+    }
+    if (!this.umlDragState || !this.canEditCurrentPolicy) {
+      return;
+    }
+    const shell = event.currentTarget as HTMLElement;
+    const canvas = shell.querySelector('.uml-canvas') as HTMLElement | null;
+    if (!canvas) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left + shell.scrollLeft) / this.umlZoom - this.umlDragState.offsetX;
+    const y = (event.clientY - rect.top + shell.scrollTop) / this.umlZoom - this.umlDragState.offsetY;
+    this.setUmlNodePosition(this.umlDragState.nodeId, x, y, true);
+  }
+
+  endUmlNodeDrag(): void {
+    if (this.umlPanState) {
+      this.umlPanState = null;
+    }
+    if (this.umlDragState) {
+      this.umlDragState = null;
+      this.syncTasksFromUml();
+      this.markDirty();
+    }
+  }
+
+  beginUmlPan(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    if (target.closest('.uml-canvas-node') || target.closest('input') || target.closest('select') || target.closest('button')) {
+      return;
+    }
+    const shell = event.currentTarget as HTMLElement;
+    this.umlPanState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: shell.scrollLeft,
+      scrollTop: shell.scrollTop
+    };
+    event.preventDefault();
+  }
+
+  zoomUmlCanvas(event: WheelEvent): void {
+    if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) {
+      return;
+    }
+    event.preventDefault();
+    const shell = event.currentTarget as HTMLElement;
+    const previousZoom = this.umlZoom;
+    const direction = event.deltaY > 0 ? -1 : 1;
+    const nextZoom = Math.max(0.5, Math.min(1.8, Number((this.umlZoom + direction * 0.1).toFixed(2))));
+    if (nextZoom === previousZoom) {
+      return;
+    }
+    const rect = shell.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left + shell.scrollLeft;
+    const pointerY = event.clientY - rect.top + shell.scrollTop;
+    const ratio = nextZoom / previousZoom;
+    this.umlZoom = nextZoom;
+    requestAnimationFrame(() => {
+      shell.scrollLeft = pointerX * ratio - (event.clientX - rect.left);
+      shell.scrollTop = pointerY * ratio - (event.clientY - rect.top);
+    });
+  }
+
+  addUmlPartition(): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    const name = this.newUmlPartitionName.trim() || `Calle ${this.umlActivityJson.partitions.length + 1}`;
+    const id = this.uniqueUmlId(this.partitionIdFromRole(name));
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      partitions: [
+        ...this.umlActivityJson.partitions,
+        { id, name, umlElement: 'ActivityPartition' }
+      ]
+    };
+    this.newUmlNodePartition = id;
+    this.newUmlPartitionName = '';
+    this.feedback = `Calle ${name} agregada.`;
+    this.markDirty();
+  }
+
+  removeUmlPartition(partitionId: string): void {
+    if (!this.canEditCurrentPolicy || this.umlActivityJson.partitions.length <= 1) {
+      return;
+    }
+    const fallbackPartition = this.umlActivityJson.partitions.find(partition => partition.id !== partitionId)?.id ?? 'partition_negocio';
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      partitions: this.umlActivityJson.partitions.filter(partition => partition.id !== partitionId),
+      nodes: this.umlActivityJson.nodes.map(node => node.partition === partitionId ? { ...node, partition: fallbackPartition } : node)
+    };
+    this.newUmlNodePartition = fallbackPartition;
+    this.syncTasksFromUml();
+    this.markDirty();
+  }
+
+  renameUmlPartition(partitionId: string, name: string): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      partitions: this.umlActivityJson.partitions.map(partition =>
+        partition.id === partitionId ? { ...partition, name: name || 'Sin nombre' } : partition
+      )
+    };
+    this.markDirty();
+  }
+
+  addUmlNode(): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    this.umlActivityJson = this.ensureValidUmlActivity(this.umlActivityJson);
+    const partition = this.umlActivityJson.partitions.some(item => item.id === this.newUmlNodePartition)
+      ? this.newUmlNodePartition
+      : this.umlActivityJson.partitions[0].id;
+    const label = this.newUmlNodeLabel.trim() || this.defaultLabelForUmlType(this.newUmlNodeType);
+    const previousIds = new Set(this.umlActivityJson.nodes.map(node => node.id));
+
+    if (this.newUmlNodeType === 'DECISION') {
+      this.insertUmlDecision(label, partition);
+    } else if (this.newUmlNodeType === 'ACTIVITY_FINAL') {
+      this.insertAdditionalFinal(label, partition);
+    } else if (this.newUmlNodeType === 'NOTE') {
+      this.insertUmlNote(label, partition);
+    } else {
+      const node = this.createUmlNode(this.newUmlNodeType, label, partition);
+      this.insertUmlSegment([node], []);
+    }
+
+    this.syncTasksFromUml();
+    const firstNewNode = this.umlActivityJson.nodes.find(node => !previousIds.has(node.id));
+    this.selectedUmlNodeId = firstNewNode?.id ?? this.selectedUmlNodeId;
+    this.newUmlNodeLabel = this.defaultLabelForUmlType(this.newUmlNodeType);
+    this.feedback = 'Nodo UML agregado. Puedes ajustar nombre, calle y guardas debajo del diagrama.';
+    this.markDirty();
+  }
+
+  removeUmlNode(nodeId: string): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    const node = this.umlActivityJson.nodes.find(item => item.id === nodeId);
+    if (!node || node.type === 'INITIAL') {
+      return;
+    }
+    const incoming = this.umlActivityJson.edges.find(edge => edge.target === nodeId);
+    const outgoing = this.umlActivityJson.edges.find(edge => edge.source === nodeId);
+    const edges = this.umlActivityJson.edges.filter(edge => edge.source !== nodeId && edge.target !== nodeId);
+    if (incoming?.source && outgoing?.target && incoming.source !== outgoing.target) {
+      edges.push({
+        id: this.uniqueUmlId('uml_edge'),
+        source: incoming.source,
+        target: outgoing.target,
+        type: outgoing.type === 'ObjectFlow' ? 'ObjectFlow' : 'ControlFlow'
+      });
+    }
+    this.umlActivityJson = this.ensureValidUmlActivity({
+      ...this.umlActivityJson,
+      nodes: this.umlActivityJson.nodes.filter(item => item.id !== nodeId),
+      edges
+    });
+    this.syncTasksFromUml();
+    this.markDirty();
+  }
+
+  updateUmlNode(nodeId: string, field: 'label' | 'type' | 'partition', value: string): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      nodes: this.umlActivityJson.nodes.map(node => {
+        if (node.id !== nodeId) {
+          return node;
+        }
+        const updated = { ...node, [field]: value };
+        if (field === 'type') {
+          updated.umlElement = this.umlElementForNodeType(value);
+        }
+        return updated;
+      })
+    };
+    this.syncTasksFromUml();
+    this.markDirty();
+  }
+
+  updateUmlEdgeGuard(edgeId: string, value: string): void {
+    if (!this.canEditCurrentPolicy) {
+      return;
+    }
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      edges: this.umlActivityJson.edges.map(edge =>
+        edge.id === edgeId ? { ...edge, guard: value.trim() || undefined } : edge
+      )
+    };
+    this.markDirty();
+  }
+
+  updateSelectedTaskDepartment(role: string): void {
+    const binding = this.selectedTaskBinding;
+    if (!binding) {
+      return;
+    }
+    binding.departmentRole = role;
+    const partition = role ? this.partitionIdFromRole(role) : this.umlActivityJson.nodes.find(node => node.id === binding.taskId)?.partition;
+    if (role && partition && !this.umlActivityJson.partitions.some(item => item.id === partition)) {
+      this.umlActivityJson = {
+        ...this.umlActivityJson,
+        partitions: [
+          ...this.umlActivityJson.partitions,
+          { id: partition, name: this.departmentNameForRole(role), umlElement: 'ActivityPartition' }
+        ]
+      };
+    }
+    if (partition && this.umlActivityJson.partitions.some(item => item.id === partition)) {
+      this.updateUmlNode(binding.taskId, 'partition', partition);
+      return;
+    }
     this.markDirty();
   }
 
@@ -1114,6 +1909,7 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.description = '';
     this.forms = [];
     this.taskBindings = [];
+    this.umlActivityJson = this.createEmptyUmlActivity();
     this.feedback = '';
     this.ownerDisplayName = this.authService.currentUserValue?.username ?? '';
     this.collaborationEnabled = false;
@@ -1173,6 +1969,10 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
       name: this.name || this.selectedPolicy.name,
       description: this.description,
       forms: this.cloneForms(this.forms),
+      departments: this.departments,
+      umlActivityJson: this.umlActivityJson,
+      umlVersion: '2.5',
+      diagramNotation: 'BPMN_EXECUTABLE_WITH_UML_ACTIVITY_VIEW',
       collaborationEnabled: this.collaborationEnabled,
       collaborationMode: this.collaborationEnabled ? this.collaborationMode : 'PRIVATE'
     };
@@ -1196,14 +1996,18 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     this.isSaving = true;
     this.saveStatus = 'saving';
     try {
-      const result = await this.modeler.saveXML({ format: true });
-      const enrichedXml = this.enrichXmlWithTaskBindings(result.xml ?? this.blankDiagram);
+      this.syncTasksFromUml();
+      const enrichedXml = this.createTechnicalBpmnXml();
       this.xmlPreview = enrichedXml;
+      await this.importXml(enrichedXml);
 
       const payload: CreatePolicyRequest = {
         name: this.name,
         description: this.description,
         bpmnXml: enrichedXml,
+        umlActivityJson: this.umlActivityJson as unknown as Record<string, unknown>,
+        umlVersion: '2.5',
+        diagramNotation: 'BPMN_EXECUTABLE_WITH_UML_ACTIVITY_VIEW',
         departments: this.departments,
         forms: this.cloneForms(this.forms),
         collaborationEnabled: this.collaborationEnabled,
@@ -1215,7 +2019,10 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
             ...this.selectedPolicy,
             ...payload,
             forms: payload.forms,
-            departments: payload.departments
+            departments: payload.departments,
+            umlActivityJson: payload.umlActivityJson,
+            umlVersion: payload.umlVersion,
+            diagramNotation: payload.diagramNotation
           })
         : this.policyService.createPolicy(payload);
 
@@ -1300,10 +2107,31 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
         return;
       }
 
+      const generatedUml = this.normalizeUmlActivity(response.generated_structure);
+      if (generatedUml) {
+        this.umlActivityJson = generatedUml;
+        this.syncTasksFromUml();
+        const visualXml = this.createTechnicalBpmnXml();
+        this.xmlPreview = visualXml;
+        this.aiDetectedSteps = response.detected_steps.map(step =>
+          String(step['label'] ?? step['text'] ?? step['id'] ?? 'Paso detectado')
+        );
+        this.aiWarnings = response.warnings ?? [];
+        if (!this.name.trim()) {
+          this.name = this.suggestPolicyNameFromPrompt(this.aiPrompt);
+        }
+        this.feedback = this.hasActionableUmlNodes(generatedUml)
+          ? 'Diagrama UML 2.5 de actividad generado y aplicado. Revisa calles, guardas y responsables antes de guardar.'
+          : 'La IA generÃ³ solo inicio/fin. Agrega acciones o describe pasos accionables para obtener un diagrama completo.';
+        this.markDirty();
+        return;
+      }
+
       const visualXml = this.buildVisualBpmnFromGeneratedStructure(response.generated_structure.nodes, response.generated_structure.flows);
       await this.importXml(visualXml);
       this.xmlPreview = visualXml;
       this.syncTasksFromXml(visualXml);
+      this.umlActivityJson = this.buildUmlActivityFromXml(visualXml);
       this.aiDetectedSteps = response.detected_steps.map(step =>
         String(step['label'] ?? step['text'] ?? step['id'] ?? 'Paso detectado')
       );
@@ -1317,9 +2145,49 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
       this.markDirty();
     } catch {
       this.saveStatus = 'error';
-      this.feedback = 'La IA generó una respuesta, pero no se pudo cargar como diagrama BPMN visual.';
+      this.feedback = 'La IA generó una respuesta, pero no se pudo cargar como diagrama de actividad.';
     } finally {
       this.aiGenerating = false;
+    }
+  }
+
+  private buildVisualBpmnFromUmlActivity(uml: UmlActivityStructure): string {
+    const nodes: GeneratedDiagramNode[] = uml.nodes
+      .filter(node => node.type !== 'NOTE')
+      .map(node => ({
+        id: node.id,
+        type: this.bpmnNodeTypeFromUmlNode(node),
+        label: node.label,
+        partition: node.partition,
+        umlElement: node.umlElement
+      }));
+    const flows: GeneratedDiagramFlow[] = uml.edges
+      .filter(edge => edge.type !== 'Annotation')
+      .map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        guard: edge.guard,
+        type: edge.type
+      }));
+
+    return this.buildVisualBpmnFromGeneratedStructure(nodes, flows);
+  }
+
+  private bpmnNodeTypeFromUmlNode(node: UmlActivityNode): GeneratedDiagramNode['type'] {
+    switch (node.type) {
+      case 'INITIAL':
+        return 'START';
+      case 'ACTIVITY_FINAL':
+        return 'END';
+      case 'DECISION':
+      case 'MERGE':
+        return 'DECISION';
+      case 'FORK':
+      case 'JOIN':
+        return 'PARALLEL';
+      default:
+        return 'TASK';
     }
   }
 
@@ -1340,9 +2208,10 @@ export class PolicyEditorComponent implements AfterViewInit, OnDestroy {
     });
 
     const processItems = nodes.map(node => this.renderBpmnNode(node)).join('\n');
-    const flowItems = flows.map(flow =>
-      `    <bpmn:sequenceFlow id="${this.escapeXml(flow.id)}" sourceRef="${this.escapeXml(flow.source)}" targetRef="${this.escapeXml(flow.target)}" />`
-    ).join('\n');
+    const flowItems = flows.map(flow => {
+      const name = flow.guard ? ` name="${this.escapeXml(flow.guard)}"` : '';
+      return `    <bpmn:sequenceFlow id="${this.escapeXml(flow.id)}" sourceRef="${this.escapeXml(flow.source)}" targetRef="${this.escapeXml(flow.target)}"${name} />`;
+    }).join('\n');
 
     const shapeItems = nodes.map(node => {
       const bounds = positions.get(node.id);
@@ -1446,6 +2315,527 @@ ${edgeItems}
     this.selectedTaskId = this.taskBindings[0]?.taskId ?? null;
   }
 
+  private syncTasksFromUml(): void {
+    const previousBindings = new Map(this.taskBindings.map(binding => [binding.taskId, binding]));
+    this.taskBindings = this.umlActivityJson.nodes
+      .filter(node => ['ACTION', 'OBJECT_NODE', 'SEND_SIGNAL', 'ACCEPT_SIGNAL', 'SIGNAL_SEND', 'SIGNAL_RECEIVE'].includes(node.type))
+      .map(node => {
+        const previous = previousBindings.get(node.id);
+        return {
+          taskId: node.id,
+          taskName: node.label || node.id,
+          departmentRole: previous?.departmentRole || this.roleFromPartitionId(node.partition),
+          formId: previous?.formId || ''
+        };
+      });
+    this.selectedTaskId = this.taskBindings[0]?.taskId ?? null;
+  }
+
+  private createTechnicalBpmnXml(): string {
+    this.umlActivityJson = this.ensureValidUmlActivity(this.umlActivityJson);
+    const xml = this.buildVisualBpmnFromUmlActivity(this.umlActivityJson);
+    return this.enrichXmlWithTaskBindings(xml);
+  }
+
+  refreshUmlActivityPreview(): void {
+    this.umlActivityJson = this.ensureValidUmlActivity(this.umlActivityJson);
+  }
+
+  private buildUmlActivityFromXml(xml: string): UmlActivityStructure {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'text/xml');
+    const sequenceFlows = Array.from(doc.getElementsByTagName('bpmn:sequenceFlow'));
+    const tasks = Array.from(doc.getElementsByTagName('bpmn:userTask'));
+    const gateways = [
+      ...Array.from(doc.getElementsByTagName('bpmn:exclusiveGateway')),
+      ...Array.from(doc.getElementsByTagName('bpmn:parallelGateway'))
+    ];
+    const startEvents = Array.from(doc.getElementsByTagName('bpmn:startEvent'));
+    const endEvents = Array.from(doc.getElementsByTagName('bpmn:endEvent'));
+    const partitions = this.buildUmlPartitions();
+    const fallbackPartition = partitions[0]?.id ?? 'partition_negocio';
+    const nodes: UmlActivityNode[] = [];
+
+    startEvents.forEach((event, index) => {
+      nodes.push({
+        id: event.getAttribute('id') || `uml_initial_${index}`,
+        type: 'INITIAL',
+        label: 'Inicio',
+        partition: fallbackPartition,
+        umlElement: 'InitialNode'
+      });
+    });
+
+    tasks.forEach((task, index) => {
+      const taskId = task.getAttribute('id') || `uml_action_${index}`;
+      const label = task.getAttribute('name') || taskId;
+      const binding = this.taskBindings.find(item => item.taskId === taskId);
+      const partition = this.partitionIdFromRole(binding?.departmentRole || task.getAttribute('data-role') || '');
+      const nodeType = this.umlNodeTypeFromTaskLabel(label);
+      nodes.push({
+        id: taskId,
+        type: nodeType,
+        label,
+        partition: partitions.some(item => item.id === partition) ? partition : fallbackPartition,
+        umlElement: this.umlElementForNodeType(nodeType)
+      });
+    });
+
+    gateways.forEach((gateway, index) => {
+      const isParallel = gateway.tagName.includes('parallelGateway');
+      const gatewayId = gateway.getAttribute('id') || `uml_gateway_${index}`;
+      const incomingCount = sequenceFlows.filter(flow => flow.getAttribute('targetRef') === gatewayId).length;
+      const outgoingCount = sequenceFlows.filter(flow => flow.getAttribute('sourceRef') === gatewayId).length;
+      const nodeType = isParallel
+        ? (incomingCount > 1 && outgoingCount <= 1 ? 'JOIN' : 'FORK')
+        : (incomingCount > 1 && outgoingCount <= 1 ? 'MERGE' : 'DECISION');
+      nodes.push({
+        id: gatewayId,
+        type: nodeType,
+        label: gateway.getAttribute('name') || this.defaultUmlGatewayLabel(nodeType),
+        partition: fallbackPartition,
+        umlElement: this.umlElementForNodeType(nodeType)
+      });
+    });
+
+    endEvents.forEach((event, index) => {
+      nodes.push({
+        id: event.getAttribute('id') || `uml_final_${index}`,
+        type: 'ACTIVITY_FINAL',
+        label: 'Fin',
+        partition: fallbackPartition,
+        umlElement: 'ActivityFinalNode'
+      });
+    });
+
+    if (!nodes.length) {
+      nodes.push(
+        { id: 'uml_initial', type: 'INITIAL', label: 'Inicio', partition: fallbackPartition, umlElement: 'InitialNode' },
+        { id: 'uml_final', type: 'ACTIVITY_FINAL', label: 'Fin', partition: fallbackPartition, umlElement: 'ActivityFinalNode' }
+      );
+    }
+
+    const edges: UmlActivityEdge[] = sequenceFlows.map((flow, index) => ({
+      id: flow.getAttribute('id') || `uml_edge_${index + 1}`,
+      source: flow.getAttribute('sourceRef') || '',
+      target: flow.getAttribute('targetRef') || '',
+      type: 'ControlFlow',
+      guard: flow.getAttribute('name') || undefined
+    })).filter(edge => edge.source && edge.target);
+
+    if (!edges.length) {
+      for (let index = 0; index < nodes.length - 1; index += 1) {
+        edges.push({
+          id: `uml_edge_${index + 1}`,
+          source: nodes[index].id,
+          target: nodes[index + 1].id,
+          type: 'ControlFlow'
+        });
+      }
+    }
+
+    return {
+      nodes,
+      edges,
+      partitions,
+      metadata: {
+        umlVersion: '2.5',
+        diagramType: 'ActivityDiagram',
+        partitionElement: 'ActivityPartition',
+        generatedFrom: 'bpmnXml'
+      }
+    };
+  }
+
+  private buildUmlPartitions(): UmlActivityPartition[] {
+    const roleSet = new Set<string>();
+    this.departments.forEach(department => {
+      if (department.role) {
+        roleSet.add(department.role);
+      }
+    });
+    this.taskBindings.forEach(binding => {
+      if (binding.departmentRole) {
+        roleSet.add(binding.departmentRole);
+      }
+    });
+
+    const partitions = Array.from(roleSet).map(role => ({
+      id: this.partitionIdFromRole(role),
+      name: this.departmentNameForRole(role),
+      umlElement: 'ActivityPartition'
+    }));
+
+    return partitions.length
+      ? partitions
+      : [{ id: 'partition_negocio', name: 'Negocio', umlElement: 'ActivityPartition' }];
+  }
+
+  private partitionIdFromRole(role: string): string {
+    const normalized = (role || 'negocio')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return `partition_${normalized || 'negocio'}`;
+  }
+
+  private departmentNameForRole(role: string): string {
+    return this.departments.find(department => department.role === role)?.name || role || 'Negocio';
+  }
+
+  private isDocumentTask(label: string): boolean {
+    return /documento|documentos|formulario|archivo|adjunto/i.test(label);
+  }
+
+  private umlNodeTypeFromTaskLabel(label: string): UmlActivityNode['type'] {
+    if (this.isNoteTask(label)) {
+      return 'NOTE';
+    }
+    if (this.isSignalReceiveTask(label)) {
+      return 'ACCEPT_SIGNAL';
+    }
+    if (this.isSignalSendTask(label)) {
+      return 'SEND_SIGNAL';
+    }
+    if (this.isDocumentTask(label)) {
+      return 'OBJECT_NODE';
+    }
+    return 'ACTION';
+  }
+
+  private isSignalSendTask(label: string): boolean {
+    return /enviar señal|envia señal|envía señal|notifica|notificar|mensaje/i.test(label);
+  }
+
+  private isSignalReceiveTask(label: string): boolean {
+    return /recibir señal|recibe señal|espera|esperar|evento externo/i.test(label);
+  }
+
+  private isNoteTask(label: string): boolean {
+    return /nota|comentario|observacion|observación/i.test(label);
+  }
+
+  private defaultUmlGatewayLabel(type: string): string {
+    switch (type) {
+      case 'FORK':
+        return 'Dividir en paralelo';
+      case 'JOIN':
+        return 'Sincronizar paralelo';
+      case 'MERGE':
+        return 'Unir caminos';
+      default:
+        return 'Decision';
+    }
+  }
+
+  private umlElementForNodeType(type: string): string {
+    return {
+      INITIAL: 'InitialNode',
+      ACTION: 'Action',
+      DECISION: 'DecisionNode',
+      MERGE: 'MergeNode',
+      FORK: 'ForkNode',
+      JOIN: 'JoinNode',
+      ACTIVITY_FINAL: 'ActivityFinalNode',
+      OBJECT_NODE: 'ObjectNode',
+      SEND_SIGNAL: 'SendSignalAction',
+      ACCEPT_SIGNAL: 'AcceptEventAction',
+      SIGNAL_SEND: 'SendSignalAction',
+      SIGNAL_RECEIVE: 'AcceptEventAction',
+      NOTE: 'Comment'
+    }[type] ?? 'ActivityNode';
+  }
+
+  private normalizeUmlActivity(value: unknown): UmlActivityStructure | null {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const candidate = value as Partial<UmlActivityStructure>;
+    if (!Array.isArray(candidate.nodes) || !Array.isArray(candidate.partitions)) {
+      return null;
+    }
+    return this.ensureUmlLayout({
+      nodes: candidate.nodes,
+      edges: Array.isArray(candidate.edges) ? candidate.edges : [],
+      partitions: candidate.partitions,
+      metadata: {
+        umlVersion: '2.5',
+        diagramType: 'ActivityDiagram',
+        partitionElement: 'ActivityPartition',
+        ...(candidate.metadata ?? {})
+      }
+    });
+  }
+
+  private hasActionableUmlNodes(uml: UmlActivityStructure): boolean {
+    return uml.nodes.some(node => ['ACTION', 'DECISION', 'MERGE', 'FORK', 'JOIN', 'OBJECT_NODE', 'SEND_SIGNAL', 'ACCEPT_SIGNAL'].includes(node.type));
+  }
+
+  private ensureValidUmlActivity(uml: UmlActivityStructure): UmlActivityStructure {
+    const partitions = uml.partitions.length
+      ? uml.partitions
+      : [{ id: 'partition_negocio', name: 'Negocio', umlElement: 'ActivityPartition' }];
+    const fallbackPartition = partitions[0].id;
+    const nodes = [...uml.nodes];
+    if (!nodes.some(node => node.type === 'INITIAL')) {
+      nodes.unshift({ id: 'uml_initial', type: 'INITIAL', label: 'Inicio', partition: fallbackPartition, umlElement: 'InitialNode' });
+    }
+    if (!nodes.some(node => node.type === 'ACTIVITY_FINAL')) {
+      nodes.push({ id: 'uml_final', type: 'ACTIVITY_FINAL', label: 'Fin', partition: fallbackPartition, umlElement: 'ActivityFinalNode' });
+    }
+    return this.ensureUmlLayout({
+      nodes,
+      edges: uml.edges,
+      partitions,
+      metadata: {
+        umlVersion: '2.5',
+        diagramType: 'ActivityDiagram',
+        partitionElement: 'ActivityPartition',
+        ...(uml.metadata ?? {})
+      }
+    });
+  }
+
+  private roleFromPartitionId(partitionId: string): string {
+    const department = this.departments.find(item => this.partitionIdFromRole(item.role) === partitionId);
+    if (department?.role) {
+      return department.role;
+    }
+    return '';
+  }
+
+  private umlNodePosition(node: UmlActivityNode): { x: number; y: number } {
+    const laneIndex = Math.max(0, this.umlActivityJson.partitions.findIndex(partition => partition.id === node.partition));
+    return {
+      x: typeof node.x === 'number' ? node.x : this.umlLaneLabelWidth + 56 + this.umlActivityJson.nodes.filter(item => item.partition === node.partition).findIndex(item => item.id === node.id) * 190,
+      y: typeof node.y === 'number' ? node.y : laneIndex * this.umlLaneHeight + 54
+    };
+  }
+
+  private umlNodeSize(node: UmlActivityNode): { width: number; height: number } {
+    switch (node.type) {
+      case 'INITIAL':
+      case 'ACTIVITY_FINAL':
+        return { width: 34, height: 34 };
+      case 'DECISION':
+      case 'MERGE':
+        return { width: 76, height: 76 };
+      case 'FORK':
+      case 'JOIN':
+        return { width: 12, height: 118 };
+      case 'NOTE':
+      case 'OBJECT_NODE':
+        return { width: 118, height: 72 };
+      default:
+        return { width: 148, height: 58 };
+    }
+  }
+
+  private setUmlNodePosition(nodeId: string, x: number, y: number, updatePartition = false): void {
+    const node = this.umlActivityJson.nodes.find(item => item.id === nodeId);
+    const size = node ? this.umlNodeSize(node) : { width: 140, height: 60 };
+    const clampedX = Math.max(this.umlLaneLabelWidth + 18, Math.min(this.umlCanvasWidth - size.width - 18, x));
+    const currentLaneIndex = Math.max(0, this.umlActivityJson.partitions.findIndex(partition => partition.id === node?.partition));
+    const laneIndex = updatePartition
+      ? Math.max(0, Math.min(this.umlActivityJson.partitions.length - 1, Math.floor((y + size.height / 2) / this.umlLaneHeight)))
+      : currentLaneIndex;
+    const partition = this.umlActivityJson.partitions[laneIndex]?.id;
+    const laneTop = laneIndex * this.umlLaneHeight;
+    const laneBottom = laneTop + this.umlLaneHeight;
+    const clampedY = Math.max(laneTop + 8, Math.min(laneBottom - size.height - 8, y));
+    this.umlActivityJson = {
+      ...this.umlActivityJson,
+      nodes: this.umlActivityJson.nodes.map(item =>
+        item.id === nodeId
+          ? { ...item, x: clampedX, y: clampedY, partition: updatePartition && partition ? partition : item.partition }
+          : item
+      )
+    };
+  }
+
+  private ensureUmlLayout(uml: UmlActivityStructure): UmlActivityStructure {
+    const laneCounts = new Map<string, number>();
+    const nodes = uml.nodes.map(node => {
+      if (typeof node.x === 'number' && typeof node.y === 'number') {
+        return node;
+      }
+      const laneIndex = Math.max(0, uml.partitions.findIndex(partition => partition.id === node.partition));
+      const count = laneCounts.get(node.partition) ?? 0;
+      laneCounts.set(node.partition, count + 1);
+      const size = this.umlNodeSize(node);
+      return {
+        ...node,
+        x: this.umlLaneLabelWidth + 56 + count * 190,
+        y: laneIndex * this.umlLaneHeight + Math.max(34, (this.umlLaneHeight - size.height) / 2)
+      };
+    });
+    return {
+      ...uml,
+      nodes,
+      metadata: {
+        ...(uml.metadata ?? {}),
+        umlVersion: '2.5',
+        diagramType: 'ActivityDiagram',
+        partitionElement: 'ActivityPartition',
+        orientation: 'horizontal',
+        canonical: true
+      }
+    };
+  }
+
+  private uniqueUmlId(prefix: string): string {
+    const existing = new Set([
+      ...this.umlActivityJson.nodes.map(node => node.id),
+      ...this.umlActivityJson.edges.map(edge => edge.id),
+      ...this.umlActivityJson.partitions.map(partition => partition.id)
+    ]);
+    const normalizedPrefix = prefix
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'uml_item';
+    let candidate = normalizedPrefix;
+    let index = 1;
+    while (existing.has(candidate)) {
+      candidate = `${normalizedPrefix}_${index++}`;
+    }
+    return candidate;
+  }
+
+  private createUmlNode(type: string, label: string, partition: string): UmlActivityNode {
+    const idPrefix = type.toLowerCase();
+    return {
+      id: this.uniqueUmlId(`uml_${idPrefix}`),
+      type,
+      label,
+      partition,
+      umlElement: this.umlElementForNodeType(type)
+    };
+  }
+
+  private insertUmlDecision(label: string, partition: string): void {
+    const decision = this.createUmlNode('DECISION', label, partition);
+    const yesAction = this.createUmlNode('ACTION', 'Ejecutar camino aprobado', partition);
+    const noAction = this.createUmlNode('ACTION', 'Ejecutar camino rechazado', partition);
+    const merge = this.createUmlNode('MERGE', 'Unir resultado', partition);
+    this.insertUmlSegment(
+      [decision, yesAction, noAction, merge],
+      [
+        { id: this.uniqueUmlId(`${decision.id}_yes`), source: decision.id, target: yesAction.id, type: 'ControlFlow', guard: '[si]' },
+        { id: this.uniqueUmlId(`${decision.id}_no`), source: decision.id, target: noAction.id, type: 'ControlFlow', guard: '[no]' },
+        { id: this.uniqueUmlId(`${yesAction.id}_merge`), source: yesAction.id, target: merge.id, type: 'ControlFlow' },
+        { id: this.uniqueUmlId(`${noAction.id}_merge`), source: noAction.id, target: merge.id, type: 'ControlFlow' }
+      ],
+      decision.id,
+      merge.id
+    );
+  }
+
+  private insertAdditionalFinal(label: string, partition: string): void {
+    const uml = this.ensureValidUmlActivity(this.umlActivityJson);
+    const finalNode = this.createUmlNode('ACTIVITY_FINAL', label, partition);
+    const sourceId = this.lastExecutableSourceId(uml);
+    this.umlActivityJson = {
+      ...uml,
+      nodes: [...uml.nodes, finalNode],
+      edges: [
+        ...uml.edges,
+        { id: this.uniqueUmlId(`${sourceId}_${finalNode.id}`), source: sourceId, target: finalNode.id, type: 'ControlFlow' }
+      ]
+    };
+  }
+
+  private insertUmlNote(label: string, partition: string): void {
+    const uml = this.ensureValidUmlActivity(this.umlActivityJson);
+    const note = this.createUmlNode('NOTE', label, partition);
+    const sourceId = this.lastExecutableSourceId(uml);
+    this.umlActivityJson = {
+      ...uml,
+      nodes: [...uml.nodes, note],
+      edges: [
+        ...uml.edges,
+        { id: this.uniqueUmlId(`${sourceId}_${note.id}`), source: sourceId, target: note.id, type: 'Annotation' }
+      ]
+    };
+  }
+
+  private insertUmlSegment(nodesToInsert: UmlActivityNode[], internalEdges: UmlActivityEdge[], entryId?: string, exitId?: string): void {
+    const uml = this.ensureValidUmlActivity(this.umlActivityJson);
+    const finalNode = uml.nodes.find(node => node.type === 'ACTIVITY_FINAL');
+    const finalId = finalNode?.id ?? 'uml_final';
+    const incomingToFinal = [...uml.edges].reverse().find(edge => edge.target === finalId);
+    const sourceId = incomingToFinal?.source
+      ?? uml.nodes.find(node => node.type === 'INITIAL')?.id
+      ?? uml.nodes[0]?.id
+      ?? 'uml_initial';
+    const cleanEdges = incomingToFinal
+      ? uml.edges.filter(edge => edge.id !== incomingToFinal.id)
+      : uml.edges;
+    const firstId = entryId ?? nodesToInsert[0].id;
+    const lastId = exitId ?? nodesToInsert[nodesToInsert.length - 1].id;
+    const edgeType = nodesToInsert[0].type === 'OBJECT_NODE' ? 'ObjectFlow' : 'ControlFlow';
+
+    this.umlActivityJson = {
+      ...uml,
+      nodes: [
+        ...uml.nodes.filter(node => node.id !== finalId),
+        ...nodesToInsert,
+        ...uml.nodes.filter(node => node.id === finalId)
+      ],
+      edges: [
+        ...cleanEdges,
+        { id: this.uniqueUmlId(`${sourceId}_${firstId}`), source: sourceId, target: firstId, type: edgeType },
+        ...internalEdges,
+        { id: this.uniqueUmlId(`${lastId}_${finalId}`), source: lastId, target: finalId, type: 'ControlFlow' }
+      ]
+    };
+  }
+
+  private lastExecutableSourceId(uml: UmlActivityStructure): string {
+    const finalIds = new Set(uml.nodes.filter(node => node.type === 'ACTIVITY_FINAL').map(node => node.id));
+    const incomingToFinal = [...uml.edges].reverse().find(edge => finalIds.has(edge.target));
+    return incomingToFinal?.source
+      ?? uml.nodes.find(node => node.type !== 'ACTIVITY_FINAL' && node.type !== 'NOTE')?.id
+      ?? uml.nodes[0]?.id
+      ?? 'uml_initial';
+  }
+
+  private defaultLabelForUmlType(type: string): string {
+    return {
+      ACTION: 'Registrar solicitud',
+      DECISION: '¿Condición cumplida?',
+      MERGE: 'Unir caminos',
+      FORK: 'Dividir tareas paralelas',
+      JOIN: 'Sincronizar tareas',
+      OBJECT_NODE: 'Documento/Formulario',
+      SEND_SIGNAL: 'Enviar notificación',
+      ACCEPT_SIGNAL: 'Esperar respuesta',
+      NOTE: 'Nota aclaratoria',
+      ACTIVITY_FINAL: 'Fin alternativo'
+    }[type] ?? 'Nueva actividad';
+  }
+
+  private createEmptyUmlActivity(): UmlActivityStructure {
+    return this.ensureUmlLayout({
+      nodes: [
+        { id: 'uml_initial', type: 'INITIAL', label: 'Inicio', partition: 'partition_negocio', umlElement: 'InitialNode' },
+        { id: 'uml_final', type: 'ACTIVITY_FINAL', label: 'Fin', partition: 'partition_negocio', umlElement: 'ActivityFinalNode' }
+      ],
+      edges: [
+        { id: 'uml_edge_empty_1', source: 'uml_initial', target: 'uml_final', type: 'ControlFlow' }
+      ],
+      partitions: [{ id: 'partition_negocio', name: 'Negocio', umlElement: 'ActivityPartition' }],
+      metadata: {
+        umlVersion: '2.5',
+        diagramType: 'ActivityDiagram',
+        partitionElement: 'ActivityPartition'
+      }
+    });
+  }
+
   private enrichXmlWithTaskBindings(xml: string): string {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, 'text/xml');
@@ -1492,8 +2882,7 @@ ${edgeItems}
       return;
     }
 
-    const result = await this.modeler.saveXML({ format: true });
-    const enrichedXml = this.enrichXmlWithTaskBindings(result.xml ?? this.blankDiagram);
+    const enrichedXml = this.createTechnicalBpmnXml();
     this.xmlPreview = enrichedXml;
 
     const payload: CollaborationMessage = {
@@ -1512,6 +2901,7 @@ ${edgeItems}
       name: this.name,
       description: this.description,
       bpmnXml: enrichedXml,
+      umlActivityJson: this.umlActivityJson,
       forms: this.cloneForms(this.forms),
       taskBindings: this.cloneTaskBindings(this.taskBindings),
       timestamp: Date.now()
@@ -1541,6 +2931,7 @@ ${edgeItems}
       name: this.name,
       description: this.description,
       bpmnXml: this.xmlPreview,
+      umlActivityJson: this.umlActivityJson,
       forms: this.cloneForms(this.forms),
       taskBindings: this.cloneTaskBindings(this.taskBindings),
       timestamp: Date.now()
@@ -1626,10 +3017,12 @@ ${edgeItems}
       this.description = payload.description;
       this.forms = this.cloneForms(payload.forms ?? []);
       this.selectedFormId = this.forms[0]?.id ?? this.selectedFormId;
+      this.umlActivityJson = this.normalizeUmlActivity(payload.umlActivityJson) ?? this.umlActivityJson;
       this.taskBindings = this.cloneTaskBindings(payload.taskBindings ?? []);
-      await this.importXml(payload.bpmnXml || this.blankDiagram);
-      this.syncTasksFromXml(payload.bpmnXml || this.blankDiagram);
-      this.xmlPreview = payload.bpmnXml || this.blankDiagram;
+      this.syncTasksFromUml();
+      const technicalXml = this.createTechnicalBpmnXml();
+      await this.importXml(technicalXml);
+      this.xmlPreview = technicalXml;
       this.hasPendingChanges = false;
       this.saveStatus = 'saved';
       this.updateCollaborationStatus(payload.actorDisplayName || payload.actor);

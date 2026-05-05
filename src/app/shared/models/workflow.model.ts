@@ -33,6 +33,9 @@ export interface Policy {
   version: number;
   status: string;
   bpmnXml?: string;
+  umlActivityJson?: { [key: string]: any };
+  umlVersion?: string;
+  diagramNotation?: string;
   departments?: DepartmentDefinition[];
   forms?: FormDefinition[];
   ownerUserId?: string;
